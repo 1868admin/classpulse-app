@@ -171,7 +171,7 @@ async function handleAuth(request, response, parts) {
   }
   if (parts[2] === 'login' && method === 'POST') {
     const body = await readJson(request);
-    const session = signIn(body.username, body.password, request.socket.remoteAddress || '');
+    const session = signIn(body.username, body.password, request.socket?.remoteAddress || '');
     respond(response, 200, { ok: true }, { 'Set-Cookie': cookieHeader(session.token, request) });
     return true;
   }

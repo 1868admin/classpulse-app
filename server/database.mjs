@@ -309,7 +309,7 @@ async function syncSimpleTable(client, db, table, original, columns, keyColumns,
     const values = valuesOf(row);
     const previous = original.get(key);
     const currentValues = keyColumns.map((column) => row[column]).concat(values);
-    if (!previous) {
+    if (previous === undefined) {
       await client.query(
         `INSERT INTO ${table} (${pgColumns}) VALUES (${pgValues})`,
         currentValues,
@@ -424,9 +424,21 @@ export async function withRequestDatabase(callback) {
           error.rollbackError = rollbackError;
         }
       }
-      if (['40001', '40P01', '23505'].includes(error.code) && attempt < 2) continue;
+      if (['40001', '40P01'].includes(error.code) && attempt < 2) continue;
       if (error.code === '23505') {
-        throw Object.assign(new Error('This change conflicts with existing data. Refresh and try again.'), { status: 409 });
+        const messages = {
+          accounts_username_unique: 'That username is already in use.',
+          records_initial_admin_unique: 'Initial administrator setup is already complete.',
+          records_student_id_unique: 'That student ID is already in use.',
+          records_birth_paper_unique: 'A student with that birth paper number already exists.',
+          records_class_membership_unique: 'This student is already assigned to that class.',
+          records_attendance_session_unique: 'An attendance session already exists for this class and date.',
+          records_student_enrollment_unique: 'This student enrollment already exists.',
+        };
+        console.error('PostgreSQL unique constraint violation:', error.constraint || 'unknown');
+        throw Object.assign(new Error(messages[error.constraint] || 'This change conflicts with existing data. Refresh and try again.'), {
+          status: 409,
+        });
       }
       if (['40001', '40P01'].includes(error.code)) {
         throw Object.assign(new Error('Another user changed this data at the same time. Please retry.'), {
