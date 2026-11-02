@@ -106,12 +106,18 @@ export default function ImportStudentsDialog({
       }
       setHeaders(parsed.headers);
       setRows(parsed.rows);
+      
       const auto = {};
       visibleFields.forEach((f) => {
-        const match = parsed.headers.find((h) => h.toLowerCase().replace(/[^a-z]/g, '').includes(f.key.replace(/_/g, '').slice(0, 6))
-          || h.toLowerCase().replace(/[^a-z]/g, '') === f.label.toLowerCase().replace(/[^a-z]/g, ''));
+        const fieldKeyClean = f.key.toLowerCase().replace(/_/g, '');
+        const fieldLabelClean = f.label.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const match = parsed.headers.find((h) => {
+          const headerClean = h.toLowerCase().replace(/[^a-z0-9]/g, '');
+          return headerClean === fieldKeyClean || headerClean === fieldLabelClean || headerClean.includes(fieldKeyClean);
+        });
         if (match) auto[f.key] = match;
       });
+
       setMapping(auto);
       setResult(null);
     } catch (error) {
@@ -175,19 +181,17 @@ export default function ImportStudentsDialog({
         const idSet = new Set(existing.map((student) => String(student.student_id_no || '').toLowerCase()));
         const people = new Set(existing.filter((student) => student.date_of_birth)
           .map((student) => `${String(student.full_name || '').toLowerCase()}|${student.date_of_birth}`));
-        const existingBirthNumbers = new Set(existing.map((student) =>
-          String(student.birth_paper_no || '').toLowerCase().replace(/[^a-z0-9]/g, '')).filter(Boolean));
         const conflicts = [];
         currentRows.forEach((row, index) => {
           if (row.student_id_no && idSet.has(String(row.student_id_no).trim().toLowerCase())) {
-            conflicts.push(`Row ${index + 2}: student ID already exists`);
+            conflicts.push(`Row ${index + 2}: student ID "${row.student_id_no}" already exists`);
           }
           const person = `${[row.first_name, row.middle_name, row.surname].filter(Boolean).join(' ').toLowerCase()}|${row.date_of_birth}`;
-          if (row.date_of_birth && people.has(person)) conflicts.push(`Row ${index + 2}: a student with the same name and date of birth already exists`);
+          if (row.date_of_birth && people.has(person)) conflicts.push(`Row ${index + 2}: student with matching name & DOB exists`);
         });
         setExistingConflicts(conflicts);
       })
-      .catch((error) => { if (active) setDuplicateCheckError(`Could not check for existing students: ${error.message}`); })
+      .catch((error) => { if (active) setDuplicateCheckError(`Could not check existing students: ${error.message}`); })
       .finally(() => { if (active) setCheckingDuplicates(false); });
     return () => { active = false; };
   }, [rows, mapping, schoolId, visibleFields, canManageSensitive]);
@@ -216,8 +220,12 @@ export default function ImportStudentsDialog({
       });
       if (res.data?.error) throw new Error(res.data.error);
       setResult(res.data);
-      notifySuccess('Import complete', `${res.data.imported} student(s) added.`);
-      onImported();
+      if (res.data.imported > 0) {
+        notifySuccess('Import complete', `${res.data.imported} student(s) added.`);
+        onImported();
+      } else {
+        notifyError('Import notice', `0 students imported. ${res.data.skipped} skipped.`);
+      }
       const p = await base44.entities.ImportJob.filter({ school_id: schoolId, type: 'students' }, { limit: 5, sort: '-created_date' });
       setHistory(p.items || []);
     } catch (err) {
@@ -272,12 +280,21 @@ export default function ImportStudentsDialog({
         )}
 
         {result && (
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
-            Imported {result.imported} student(s); {result.skipped} skipped.
+          <div className={`rounded-xl border p-4 text-xs ${result.imported > 0 ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+            <p className="font-semibold">Import finished: {result.imported} student(s) added, {result.skipped} skipped.</p>
+            {result.errors?.length > 0 && (
+              <div className="mt-2">
+                <p className="font-medium text-destructive">Skipped row details:</p>
+                <ul className="mt-1 list-disc list-inside space-y-0.5 max-h-32 overflow-y-auto">
+                  {result.errors.map((e, i) => (
+                    <li key={i}>{typeof e === 'string' ? e : `Row ${e.row}: ${e.reason}`}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         )}
 
-        {/* Confirmation Modal safely moved OUTSIDE result block so it appears properly */}
         {confirmOpen && (
           <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
             <div className="w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-xl">

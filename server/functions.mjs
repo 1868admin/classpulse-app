@@ -1072,12 +1072,12 @@ function importStudents(actor, body) {
       continue;
     }
     if (studentId && existingIds.has(studentId.toLowerCase())) {
-      skipped.push({ row: index + 2, student_id_no: studentId, reason: 'Student ID already exists' });
+      skipped.push({ row: index + 2, student_id_no: studentId, reason: `Student ID "${studentId}" already exists in database` });
       continue;
     }
     const nameKey = row.date_of_birth ? `${fullName.toLowerCase()}|${String(row.date_of_birth).trim()}` : '';
     if (nameKey && seenNames.has(nameKey)) {
-      skipped.push({ row: index + 2, student_id_no: studentId, reason: 'A student with the same name and date of birth already exists' });
+      skipped.push({ row: index + 2, student_id_no: studentId, reason: `Student "${fullName}" (DOB: ${row.date_of_birth}) already exists` });
       continue;
     }
     if (birthNumber) {
@@ -1094,10 +1094,18 @@ function importStudents(actor, body) {
     }
     if (studentId) existingIds.add(studentId.toLowerCase());
     if (nameKey) seenNames.add(nameKey);
+
+    let graduatingYear = 0;
+    if (studentId) {
+      const matchYear = studentId.match(/^(\d{4})/);
+      if (matchYear) graduatingYear = parseInt(matchYear[1], 10);
+    }
+
     imported.push({
       _source_row: index + 2,
       school_id: schoolId,
       student_id_no: studentId,
+      graduating_year: graduatingYear,
       birth_paper_no: birthNumber,
       first_name: firstName,
       middle_name: String(row.middle_name || '').trim(),
@@ -1119,7 +1127,6 @@ function importStudents(actor, body) {
   }
 
   return withTransaction(() => {
-    // OPTIMIZATION: Pull the existing IDs just once outside the loop to avoid O(N^2) transaction timeouts
     const txnExistingIds = new Set(records('Student', (s) => s.school_id === schoolId)
       .map((s) => String(s.student_id_no || '').toLowerCase()));
       
@@ -1129,9 +1136,11 @@ function importStudents(actor, body) {
         const generated = allocateStudentId(schoolId, record.year_group_id, record.homeroom_class_id);
         record.student_id_no = generated.studentId;
         record.graduating_year = generated.graduatingYear;
+      } else if (!record.graduating_year) {
+        record.graduating_year = new Date().getFullYear() + 5;
       }
       if (txnExistingIds.has(record.student_id_no.toLowerCase())) {
-        skipped.push({ row: sourceRow, student_id_no: record.student_id_no, reason: 'Generated student ID already exists' });
+        skipped.push({ row: sourceRow, student_id_no: record.student_id_no, reason: `Student ID "${record.student_id_no}" already exists` });
         return null;
       }
       txnExistingIds.add(record.student_id_no.toLowerCase());
@@ -1190,7 +1199,7 @@ function importStudents(actor, body) {
       imported_count: created.length,
       failed_count: skipped.length,
       status: 'completed',
-      errors: skipped.map((item) => `Row ${item.row}: ${item.reason}`),
+      errors: skipped.map((item) => typeof item === 'string' ? item : `Row ${item.row}: ${item.reason}`),
       created_by_name: actor.user.full_name || actor.user.username,
       summary: `Imported ${created.length}; skipped ${skipped.length}`,
     });
@@ -1205,7 +1214,6 @@ function importStudents(actor, body) {
     return { imported: created.length, skipped: skipped.length, errors: skipped, student_ids: created.map((student) => student.id), job };
   });
 }
-
 function promoteStudents(actor, body) {
   const member = requireMembership(actor);
   const schoolId = member.school_id;
