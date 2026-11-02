@@ -48,9 +48,9 @@ const AuthenticatedApp = () => {
     } else {
       return ( 
         <div className="flex min-h-screen flex-col items-center justify-center gap-3 px-6 text-center">
-          <h1 className="text-lg font-bold">Local ClassPulse server unavailable</h1>
+          <h1 className="text-lg font-bold">ClassPulse server unavailable</h1>
           <p className="max-w-md text-sm text-muted-foreground">
-            Start the app with <code>npm run dev</code>, then reload this page.
+            The app could not connect to its server. Please try again later.
           </p>
         </div>
       );
