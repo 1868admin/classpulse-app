@@ -1,0 +1,53 @@
+{
+  "name": "HomeroomClass",
+  "type": "object",
+  "properties": {
+    "school_id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "year_group_id": {
+      "type": "string"
+    },
+    "year_group_name": {
+      "type": "string"
+    },
+    "academic_year_id": {
+      "type": "string"
+    },
+    "room": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "student_count": {
+      "type": "number",
+      "default": 0
+    },
+    "archived": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "required": [
+    "school_id",
+    "name"
+  ],
+  "rls": {
+    "read": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "create": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "update": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "delete": {
+      "data.school_id": "{{user.data.school_id}}"
+    }
+  }
+}

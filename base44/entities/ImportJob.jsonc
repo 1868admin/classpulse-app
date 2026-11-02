@@ -1,0 +1,63 @@
+{
+  "name": "ImportJob",
+  "type": "object",
+  "properties": {
+    "school_id": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "students",
+        "timetable"
+      ]
+    },
+    "file_name": {
+      "type": "string"
+    },
+    "total_rows": {
+      "type": "number",
+      "default": 0
+    },
+    "imported_count": {
+      "type": "number",
+      "default": 0
+    },
+    "failed_count": {
+      "type": "number",
+      "default": 0
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "status": {
+      "type": "string",
+      "default": "completed"
+    },
+    "created_by_name": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "school_id",
+    "type"
+  ],
+  "rls": {
+    "read": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "create": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "update": false,
+    "delete": {
+      "data.school_id": "{{user.data.school_id}}"
+    }
+  }
+}

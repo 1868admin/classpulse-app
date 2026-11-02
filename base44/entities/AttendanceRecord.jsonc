@@ -1,0 +1,63 @@
+{
+  "name": "AttendanceRecord",
+  "type": "object",
+  "properties": {
+    "school_id": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "class_type": {
+      "type": "string"
+    },
+    "class_id": {
+      "type": "string"
+    },
+    "date": {
+      "type": "string"
+    },
+    "student_id": {
+      "type": "string"
+    },
+    "student_name": {
+      "type": "string"
+    },
+    "student_id_no": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "default": "present"
+    },
+    "note": {
+      "type": "string"
+    },
+    "marked_by": {
+      "type": "string"
+    },
+    "academic_year_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "school_id",
+    "session_id",
+    "student_id",
+    "date"
+  ],
+  "rls": {
+    "read": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "create": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "update": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "delete": {
+      "data.school_id": "{{user.data.school_id}}"
+    }
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "name": "SchoolMember",
+  "type": "object",
+  "properties": {
+    "school_id": {
+      "type": "string"
+    },
+    "user_id": {
+      "type": "string"
+    },
+    "user_email": {
+      "type": "string"
+    },
+    "full_name": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string",
+      "enum": [
+        "school_admin",
+        "it_admin",
+        "teacher"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "inactive",
+        "invited"
+      ],
+      "default": "active"
+    },
+    "username": {
+      "type": "string"
+    },
+    "phone": {
+      "type": "string"
+    },
+    "subject_specialisms": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "school_id",
+    "full_name",
+    "role"
+  ],
+  "rls": {
+    "read": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

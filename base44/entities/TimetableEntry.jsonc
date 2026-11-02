@@ -1,0 +1,72 @@
+{
+  "name": "TimetableEntry",
+  "type": "object",
+  "properties": {
+    "school_id": {
+      "type": "string"
+    },
+    "member_id": {
+      "type": "string"
+    },
+    "user_id": {
+      "type": "string"
+    },
+    "academic_year_id": {
+      "type": "string"
+    },
+    "day_name": {
+      "type": "string"
+    },
+    "period_number": {
+      "type": "number"
+    },
+    "start_time": {
+      "type": "string"
+    },
+    "end_time": {
+      "type": "string"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "class_name": {
+      "type": "string"
+    },
+    "subject_class_id": {
+      "type": "string"
+    },
+    "homeroom_id": {
+      "type": "string"
+    },
+    "room": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "archived": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "required": [
+    "school_id",
+    "member_id",
+    "day_name",
+    "period_number"
+  ],
+  "rls": {
+    "read": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "create": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "update": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "delete": {
+      "data.school_id": "{{user.data.school_id}}"
+    }
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "name": "ClassTeacher",
+  "type": "object",
+  "properties": {
+    "school_id": {
+      "type": "string"
+    },
+    "class_type": {
+      "type": "string",
+      "enum": [
+        "homeroom",
+        "subject"
+      ]
+    },
+    "class_id": {
+      "type": "string"
+    },
+    "class_name": {
+      "type": "string"
+    },
+    "member_id": {
+      "type": "string"
+    },
+    "user_id": {
+      "type": "string"
+    },
+    "member_name": {
+      "type": "string"
+    },
+    "is_primary": {
+      "type": "boolean",
+      "default": false
+    },
+    "academic_year_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "school_id",
+    "class_type",
+    "class_id",
+    "member_id"
+  ],
+  "rls": {
+    "read": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "create": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "update": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "delete": {
+      "data.school_id": "{{user.data.school_id}}"
+    }
+  }
+}

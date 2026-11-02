@@ -1,0 +1,69 @@
+{
+  "name": "CalendarDate",
+  "type": "object",
+  "properties": {
+    "school_id": {
+      "type": "string"
+    },
+    "date": {
+      "type": "string"
+    },
+    "day_type": {
+      "type": "string",
+      "enum": [
+        "cycle",
+        "no_school",
+        "special"
+      ],
+      "default": "cycle"
+    },
+    "day_name": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "special_periods": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "number": {
+            "type": "number"
+          },
+          "start": {
+            "type": "string"
+          },
+          "end": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "academic_year_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "school_id",
+    "date",
+    "day_type"
+  ],
+  "rls": {
+    "read": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "create": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "update": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "delete": {
+      "data.school_id": "{{user.data.school_id}}"
+    }
+  }
+}

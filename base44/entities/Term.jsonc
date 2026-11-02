@@ -1,0 +1,46 @@
+{
+  "name": "Term",
+  "type": "object",
+  "properties": {
+    "school_id": {
+      "type": "string"
+    },
+    "academic_year_id": {
+      "type": "string"
+    },
+    "academic_year_name": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "start_date": {
+      "type": "string"
+    },
+    "end_date": {
+      "type": "string"
+    },
+    "is_current": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "required": [
+    "school_id",
+    "name"
+  ],
+  "rls": {
+    "read": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "create": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "update": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "delete": {
+      "data.school_id": "{{user.data.school_id}}"
+    }
+  }
+}

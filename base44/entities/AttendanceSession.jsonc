@@ -1,0 +1,108 @@
+{
+  "name": "AttendanceSession",
+  "type": "object",
+  "properties": {
+    "school_id": {
+      "type": "string"
+    },
+    "session_key": {
+      "type": "string"
+    },
+    "class_type": {
+      "type": "string",
+      "enum": [
+        "homeroom",
+        "subject"
+      ]
+    },
+    "class_id": {
+      "type": "string"
+    },
+    "class_name": {
+      "type": "string"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "date": {
+      "type": "string"
+    },
+    "day_name": {
+      "type": "string"
+    },
+    "period_number": {
+      "type": "number"
+    },
+    "period_numbers": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      }
+    },
+    "session_label": {
+      "type": "string"
+    },
+    "member_id": {
+      "type": "string"
+    },
+    "member_name": {
+      "type": "string"
+    },
+    "user_id": {
+      "type": "string"
+    },
+    "academic_year_id": {
+      "type": "string"
+    },
+    "student_count": {
+      "type": "number",
+      "default": 0
+    },
+    "present_count": {
+      "type": "number",
+      "default": 0
+    },
+    "absent_count": {
+      "type": "number",
+      "default": 0
+    },
+    "late_count": {
+      "type": "number",
+      "default": 0
+    },
+    "excused_count": {
+      "type": "number",
+      "default": 0
+    },
+    "status": {
+      "type": "string",
+      "default": "submitted"
+    },
+    "submitted_at": {
+      "type": "string"
+    },
+    "last_edited_by": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "school_id",
+    "session_key",
+    "class_id",
+    "date"
+  ],
+  "rls": {
+    "read": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "create": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "update": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "delete": {
+      "data.school_id": "{{user.data.school_id}}"
+    }
+  }
+}

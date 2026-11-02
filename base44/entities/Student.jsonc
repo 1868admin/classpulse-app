@@ -1,0 +1,102 @@
+{
+  "name": "Student",
+  "type": "object",
+  "properties": {
+    "school_id": {
+      "type": "string"
+    },
+    "student_id_no": {
+      "type": "string"
+    },
+    "birth_paper_no": {
+      "type": "string"
+    },
+    "graduating_year": {
+      "type": "number"
+    },
+    "first_name": {
+      "type": "string"
+    },
+    "middle_name": {
+      "type": "string"
+    },
+    "surname": {
+      "type": "string"
+    },
+    "full_name": {
+      "type": "string"
+    },
+    "gender": {
+      "type": "string"
+    },
+    "date_of_birth": {
+      "type": "string"
+    },
+    "year_group_id": {
+      "type": "string"
+    },
+    "year_group_name": {
+      "type": "string"
+    },
+    "homeroom_class_id": {
+      "type": "string"
+    },
+    "homeroom_class_name": {
+      "type": "string"
+    },
+    "academic_year_id": {
+      "type": "string"
+    },
+    "academic_year_name": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "inactive",
+        "transferred",
+        "graduated"
+      ],
+      "default": "active"
+    },
+    "date_enrolled": {
+      "type": "string"
+    },
+    "guardian_name": {
+      "type": "string"
+    },
+    "guardian_phone": {
+      "type": "string"
+    },
+    "address": {
+      "type": "string"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "archived": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "required": [
+    "school_id",
+    "first_name",
+    "surname"
+  ],
+  "rls": {
+    "read": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "create": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "update": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "delete": {
+      "data.school_id": "{{user.data.school_id}}"
+    }
+  }
+}

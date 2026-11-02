@@ -1,0 +1,83 @@
+{
+  "name": "StudentEnrollment",
+  "type": "object",
+  "properties": {
+    "school_id": {
+      "type": "string"
+    },
+    "student_id": {
+      "type": "string"
+    },
+    "student_name": {
+      "type": "string"
+    },
+    "student_id_no": {
+      "type": "string"
+    },
+    "academic_year_id": {
+      "type": "string"
+    },
+    "academic_year_name": {
+      "type": "string"
+    },
+    "year_group_id": {
+      "type": "string"
+    },
+    "year_group_name": {
+      "type": "string"
+    },
+    "homeroom_class_id": {
+      "type": "string"
+    },
+    "homeroom_class_name": {
+      "type": "string"
+    },
+    "class_type": {
+      "type": "string",
+      "enum": [
+        "homeroom",
+        "subject"
+      ]
+    },
+    "source_class_id": {
+      "type": "string"
+    },
+    "source_class_name": {
+      "type": "string"
+    },
+    "destination_class_id": {
+      "type": "string"
+    },
+    "destination_class_name": {
+      "type": "string"
+    },
+    "destination_academic_year_id": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "default": "active"
+    },
+    "outcome": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "school_id",
+    "student_id"
+  ],
+  "rls": {
+    "read": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "create": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "update": {
+      "data.school_id": "{{user.data.school_id}}"
+    },
+    "delete": {
+      "data.school_id": "{{user.data.school_id}}"
+    }
+  }
+}
