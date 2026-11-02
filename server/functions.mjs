@@ -1060,6 +1060,7 @@ function importStudents(actor, body) {
     String(student.birth_paper_no || '').toLowerCase().replace(/[^a-z0-9]/g, '')).filter(Boolean));
   const seenNames = new Set(existingStudents.filter((student) => student.date_of_birth).map((student) =>
     `${String(student.full_name || '').toLowerCase()}|${student.date_of_birth}`));
+  
   for (const [index, row] of body.rows.entries()) {
     const studentId = String(row.student_id_no || '').trim();
     const firstName = String(row.first_name || '').trim();
@@ -1118,6 +1119,10 @@ function importStudents(actor, body) {
   }
 
   return withTransaction(() => {
+    // OPTIMIZATION: Pull the existing IDs just once outside the loop to avoid O(N^2) transaction timeouts
+    const txnExistingIds = new Set(records('Student', (s) => s.school_id === schoolId)
+      .map((s) => String(s.student_id_no || '').toLowerCase()));
+      
     const created = imported.map((student) => {
       const { _source_row: sourceRow, ...record } = student;
       if (!student.student_id_no) {
@@ -1125,13 +1130,14 @@ function importStudents(actor, body) {
         record.student_id_no = generated.studentId;
         record.graduating_year = generated.graduatingYear;
       }
-      if (records('Student', (existing) =>
-        existing.school_id === schoolId && String(existing.student_id_no || '').toLowerCase() === record.student_id_no.toLowerCase()).length) {
+      if (txnExistingIds.has(record.student_id_no.toLowerCase())) {
         skipped.push({ row: sourceRow, student_id_no: record.student_id_no, reason: 'Generated student ID already exists' });
         return null;
       }
+      txnExistingIds.add(record.student_id_no.toLowerCase());
       return createRecord('Student', record);
     }).filter(Boolean);
+
     if (targetHomeroomId) {
       for (const student of created) {
         createRecord('ClassMembership', {
@@ -1150,12 +1156,14 @@ function importStudents(actor, body) {
       const total = records('ClassMembership', (item) => item.school_id === schoolId && item.class_type === 'homeroom' && item.class_id === targetHomeroomId).length;
       updateRecord('HomeroomClass', targetHomeroomId, { student_count: total });
     }
+    
     if (targetClassType === 'subject') {
+      const existingSubjectMemberships = new Set(records('ClassMembership', (item) => 
+        item.school_id === schoolId && item.class_type === 'subject' && item.class_id === targetClassId
+      ).map(m => m.student_id));
+      
       for (const student of created) {
-        const alreadyAssigned = find('ClassMembership', (item) =>
-          item.school_id === schoolId && item.class_type === 'subject'
-          && item.class_id === targetClassId && item.student_id === student.id);
-        if (!alreadyAssigned) {
+        if (!existingSubjectMemberships.has(student.id)) {
           createRecord('ClassMembership', {
             school_id: schoolId,
             class_type: 'subject',
@@ -1168,12 +1176,12 @@ function importStudents(actor, body) {
             year_group_name: student.year_group_name,
             academic_year_id: student.academic_year_id,
           });
+          existingSubjectMemberships.add(student.id);
         }
       }
-      const total = records('ClassMembership', (item) =>
-        item.school_id === schoolId && item.class_type === 'subject' && item.class_id === targetClassId).length;
-      updateRecord('SubjectClass', targetClassId, { student_count: total });
+      updateRecord('SubjectClass', targetClassId, { student_count: existingSubjectMemberships.size });
     }
+    
     const job = createRecord('ImportJob', {
       school_id: schoolId,
       type: 'students',
@@ -1186,12 +1194,14 @@ function importStudents(actor, body) {
       created_by_name: actor.user.full_name || actor.user.username,
       summary: `Imported ${created.length}; skipped ${skipped.length}`,
     });
+    
     audit({ ...actor, member }, {
       action: 'students.imported',
       entityType: 'ImportJob',
       entityId: job.id,
       summary: `Imported ${created.length} students; skipped ${skipped.length}`,
     });
+    
     return { imported: created.length, skipped: skipped.length, errors: skipped, student_ids: created.map((student) => student.id), job };
   });
 }
