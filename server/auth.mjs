@@ -5,6 +5,7 @@ const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const PASSWORD_KEY_LENGTH = 64;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_FAILURE_LIMIT = 5;
+const LOGIN_LINK_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 function hashToken(token) {
   return createHash('sha256').update(token).digest('hex');
@@ -301,4 +302,47 @@ export function getAccountForUser(userId) {
 
 export function updateUser(userId, patch) {
   return updateRecord('User', userId, patch);
+}
+
+export function createLoginLink(userId) {
+  const token = randomBytes(32).toString('base64url');
+  const expiresAt = Date.now() + LOGIN_LINK_TTL_MS;
+  updateUser(userId, { login_link_hash: hashToken(token), login_link_expires: expiresAt });
+  return { token, expiresAt };
+}
+
+export function signInWithLink(token) {
+  const invalid = () => Object.assign(new Error('This sign-in link is invalid or has expired. Ask your administrator for a new one.'), { status: 401 });
+  if (typeof token !== 'string' || token.length < 20 || token.length > 128) throw invalid();
+  const hash = hashToken(token);
+  for (const row of database.prepare('SELECT id, data FROM records WHERE entity = ?').all('User')) {
+    const user = JSON.parse(row.data);
+    if (user.login_link_hash !== hash) continue;
+    // Links are single-use: clear before issuing the session.
+    updateUser(user.id, { login_link_hash: '', login_link_expires: 0 });
+    const account = database.prepare('SELECT active FROM accounts WHERE user_id = ?').get(user.id);
+    if (Number(user.login_link_expires) <= Date.now() || !account?.active) throw invalid();
+    return createSession(user.id);
+  }
+  throw invalid();
+}
+
+export function ensureLocalAccount({ userId, fullName, email = '', preferredUsername = '' }) {
+  const existing = getAccountForUser(userId);
+  if (existing) return existing.username;
+  const base = (String(preferredUsername || '').trim()
+    || String(email).split('@')[0]
+    || String(fullName).toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '')
+    || 'user').replace(/[^a-zA-Z0-9._-]/g, '').slice(0, 24).padEnd(3, 'x');
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const username = attempt === 0 && preferredUsername ? base : `${base}${randomBytes(2).readUInt16BE() % 10000}`;
+    try {
+      createLocalAccount({ username, password: randomBytes(24).toString('base64url'), userId, email });
+      return username;
+    } catch (error) {
+      if (error.status !== 409) throw error;
+      if (attempt === 0 && preferredUsername) throw error;
+    }
+  }
+  throw Object.assign(new Error('Could not generate a username'), { status: 500 });
 }

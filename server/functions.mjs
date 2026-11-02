@@ -1,5 +1,5 @@
 import { createRecord, database, deleteRecord, getRecord, getRecords, updateRecord, withTransaction } from './database.mjs';
-import { createLocalAccount, disableAccount, getAccountForUser, setAccountActive, updateAccountCredentials, updateUser } from './auth.mjs';
+import { createLocalAccount, createLoginLink, disableAccount, ensureLocalAccount, getAccountForUser, setAccountActive, updateAccountCredentials, updateUser } from './auth.mjs';
 
 const isStaff = (member) => member && ['school_admin', 'it_admin'].includes(member.role);
 const isSchoolAdmin = (member) => member?.role === 'school_admin';
@@ -199,7 +199,8 @@ function manageStaff(actor, body) {
     if (email && records('SchoolMember').some((item) => item.school_id === schoolId && item.user_email?.toLowerCase() === email)) {
       throw Object.assign(new Error('A staff account already exists for that email'), { status: 409 });
     }
-    if (typeof body.password !== 'string' || body.password.length < 8) {
+    const hasPassword = typeof body.password === 'string' && body.password.length > 0;
+    if (hasPassword && body.password.length < 8) {
       throw Object.assign(new Error('Set a local password of at least 8 characters'), { status: 400 });
     }
 
@@ -211,7 +212,9 @@ function manageStaff(actor, body) {
         school_id: schoolId,
         school_role: role,
       });
-      createLocalAccount({ username, password: body.password, userId: user.id, email });
+      const accountUsername = hasPassword
+        ? (createLocalAccount({ username, password: body.password, userId: user.id, email }), username)
+        : ensureLocalAccount({ userId: user.id, fullName, email, preferredUsername: body.username });
       const created = createRecord('SchoolMember', {
         school_id: schoolId,
         user_id: user.id,
@@ -219,7 +222,7 @@ function manageStaff(actor, body) {
         full_name: fullName,
         role,
         status: 'active',
-        username,
+        username: accountUsername,
         phone: body.phone || '',
         subject_specialisms: body.subject_specialisms || '',
       });
@@ -300,6 +303,36 @@ function manageStaff(actor, body) {
         summary: `Updated ${target.full_name}`,
       });
       return { member: updated };
+    });
+  }
+
+  if (body.action === 'create_link') {
+    const target = getRecord('SchoolMember', body.member_id);
+    if (!target || target.school_id !== schoolId || !target.user_id) {
+      throw Object.assign(new Error('Staff member not found'), { status: 404 });
+    }
+    if (target.role === 'school_admin' && !isSchoolAdmin(member)) {
+      throw Object.assign(new Error('Only a school administrator can create a link for an administrator account'), { status: 403 });
+    }
+    if (target.status === 'inactive') {
+      throw Object.assign(new Error('Reactivate this staff member before creating a sign-in link'), { status: 400 });
+    }
+    return withTransaction(() => {
+      const username = ensureLocalAccount({
+        userId: target.user_id,
+        fullName: target.full_name,
+        email: target.user_email,
+        preferredUsername: target.username,
+      });
+      const link = createLoginLink(target.user_id);
+      updateRecord('SchoolMember', target.id, { username, status: 'active' });
+      audit({ ...actor, member }, {
+        action: 'staff.login_link_created',
+        entityType: 'SchoolMember',
+        entityId: target.id,
+        summary: `Created a one-time sign-in link for ${target.full_name}`,
+      });
+      return { token: link.token, expires_at: new Date(link.expiresAt).toISOString() };
     });
   }
 

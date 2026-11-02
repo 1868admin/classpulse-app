@@ -29,7 +29,7 @@ export default function StaffDialog({ open, onOpenChange, staff, canGrantAdmin, 
     if (!form.full_name.trim()) { setError('Enter the teacher\'s full name.'); return; }
     if (!staff && form.user_email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.user_email)) { setError('Enter a valid email address or leave it blank.'); return; }
     if (!staff && !form.username.trim()) { setError('Enter a username.'); return; }
-    if (!staff && form.password.length < 8) { setError('Set a password of at least 8 characters.'); return; }
+    if (!staff && form.password && form.password.length < 8) { setError('Passwords need at least 8 characters, or leave it blank to use a sign-in link.'); return; }
     if (staff && !staff.has_local_login && form.password.length < 8) {
       setError('This imported account needs a local password of at least 8 characters.');
       return;
@@ -100,8 +100,8 @@ export default function StaffDialog({ open, onOpenChange, staff, canGrantAdmin, 
           </div>
           <div>
             <Label className="mb-1.5 block text-[13px]">{staff ? 'Set / reset password' : 'Default password'}</Label>
-            <Input type="password" autoComplete="new-password" value={form.password} onChange={set('password')} placeholder={staff?.has_local_login ? 'Leave blank to keep current' : 'At least 8 characters'} required={!staff || !staff.has_local_login} minLength={8} />
-            {!staff && <p className="mt-1 text-[11px] text-muted-foreground">This password is active immediately. Share it privately with the staff member.</p>}
+            <Input type="password" autoComplete="new-password" value={form.password} onChange={set('password')} placeholder={staff?.has_local_login ? 'Leave blank to keep current' : staff ? 'At least 8 characters' : 'Optional — leave blank to use a sign-in link'} required={!!staff && !staff.has_local_login} minLength={8} />
+            {!staff && <p className="mt-1 text-[11px] text-muted-foreground">Leave blank to skip the password, then use the link button on the Staff page to give them a one-click sign-in link.</p>}
           </div>
           <div>
             <Label className="mb-1.5 block text-[13px]">Phone</Label>

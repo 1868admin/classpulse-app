@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Plus, UserCog, ShieldCheck, Trash2, Pencil } from 'lucide-react';
+import { Plus, UserCog, ShieldCheck, Trash2, Pencil, Link2 } from 'lucide-react';
 import { base44 } from '@/api/base44Client';
 import { useSchool } from '@/context/SchoolContext';
 import AppShell from '@/components/shell/AppShell';
 import PageHeader from '@/components/ui-bits/PageHeader';
 import EmptyState from '@/components/ui-bits/EmptyState';
 import StaffDialog from '@/components/staff/StaffDialog';
+import StaffLinkDialog from '@/components/staff/StaffLinkDialog';
 import ConfirmDialog from '@/components/ui-bits/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -18,6 +19,7 @@ export default function Staff() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [removing, setRemoving] = useState(null);
+  const [link, setLink] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -36,6 +38,17 @@ export default function Staff() {
       load();
     } catch (err) {
       notifyError('Could not remove staff', err.response?.data?.error || err.message);
+    }
+  };
+
+  const createLink = async (m) => {
+    try {
+      const res = await base44.functions.invoke('manageStaff', { action: 'create_link', member_id: m.id });
+      if (res.data?.error) throw new Error(res.data.error);
+      setLink({ ...res.data, name: m.full_name });
+      load();
+    } catch (err) {
+      notifyError('Could not create link', err.response?.data?.error || err.message);
     }
   };
 
@@ -85,6 +98,9 @@ export default function Staff() {
                     <td className="max-w-[180px] truncate px-3 py-2.5 text-xs text-muted-foreground">{m.subject_specialisms || '—'}</td>
                     <td className="px-3 py-2.5">
                       <div className="flex items-center justify-end gap-1">
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => createLink(m)} aria-label="Create sign-in link" title="Create one-click sign-in link">
+                          <Link2 className="h-3.5 w-3.5" />
+                        </Button>
                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditing(m); setDialogOpen(true); }} aria-label="Edit">
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>
@@ -108,6 +124,7 @@ export default function Staff() {
       </p>
 
       <StaffDialog open={dialogOpen} onOpenChange={setDialogOpen} staff={editing} canGrantAdmin={isSchoolAdmin} onSaved={load} />
+      <StaffLinkDialog link={link} onClose={() => setLink(null)} />
       {removing && (
         <ConfirmDialog
           open={!!removing}

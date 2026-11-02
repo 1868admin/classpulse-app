@@ -48,6 +48,7 @@ export const base44 = {
   auth: {
     loginViaEmailPassword: (username, password) =>
       request('/auth/login', { method: 'POST', body: { username, password } }),
+    loginViaLink: (token) => request('/auth/link-login', { method: 'POST', body: { token } }),
     createFirstAdmin: (details) => request('/auth/setup', { method: 'POST', body: details }),
     recoverInitialAdmin: (details) => request('/auth/recover-admin', { method: 'POST', body: details }),
     me: () => request('/auth/me'),
