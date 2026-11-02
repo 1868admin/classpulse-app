@@ -1,10 +1,27 @@
-async function request(path, { method = 'GET', body } = {}) {
-  const response = await fetch(`/api${path}`, {
-    method,
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    credentials: 'same-origin',
-  });
+const RETRYABLE_STATUSES = new Set([502, 503, 504]);
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Only read-only calls are retried; a failed write is never silently repeated.
+async function request(path, { method = 'GET', body, retries = method === 'GET' ? 2 : 0 } = {}) {
+  let response;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      response = await fetch(`/api${path}`, {
+        method,
+        headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        credentials: 'same-origin',
+      });
+    } catch (networkError) {
+      if (attempt < retries) { await wait(400 * (attempt + 1)); continue; }
+      throw Object.assign(new Error('Could not reach the ClassPulse server. Check your connection and try again.'), { cause: networkError });
+    }
+    if (RETRYABLE_STATUSES.has(response.status) && attempt < retries) {
+      await wait(400 * (attempt + 1));
+      continue;
+    }
+    break;
+  }
   if (response.status === 204) return null;
 
   const contentType = response.headers.get('content-type') || '';
@@ -25,8 +42,8 @@ const entities = new Proxy({}, {
     if (typeof entity !== 'string') return undefined;
     const path = `/entities/${encodeURIComponent(entity)}`;
     return {
-      filter: (query = {}, options = {}) => request(`${path}/filter`, { method: 'POST', body: { query, options } }),
-      count: (query = {}) => request(`${path}/count`, { method: 'POST', body: { query } }),
+      filter: (query = {}, options = {}) => request(`${path}/filter`, { method: 'POST', body: { query, options }, retries: 2 }),
+      count: (query = {}) => request(`${path}/count`, { method: 'POST', body: { query }, retries: 2 }),
       get: (id) => request(`${path}/${encodeURIComponent(id)}`),
       create: (record) => request(path, { method: 'POST', body: record }),
       bulkCreate: (records) => request(`${path}/bulk`, { method: 'POST', body: records }),
@@ -38,8 +55,15 @@ const entities = new Proxy({}, {
   },
 });
 
+// Runs several read queries in one request so hosted pages load with a single database round trip.
+async function queryBatch(queries) {
+  const data = await request('/functions/queryBatch', { method: 'POST', body: { queries }, retries: 2 });
+  return data.results;
+}
+
 export const base44 = {
   entities,
+  queryBatch,
   functions: {
     invoke: async (name, payload = {}) => ({
       data: await request(`/functions/${encodeURIComponent(name)}`, { method: 'POST', body: payload }),

@@ -28,7 +28,7 @@ import ForgotPassword from '@/pages/ForgotPassword';
 import ResetPassword from '@/pages/ResetPassword';
 import RecoverAdmin from '@/pages/RecoverAdmin';
 
-const AUTH_PATHS = ['/login', '/register', '/forgot-password', '/reset-password', '/recover-admin'];
+const AUTH_PATHS = ['/login', '/register', '/forgot-password', '/reset-password', '/recover-admin', '/welcome'];
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();

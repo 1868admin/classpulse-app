@@ -1,4 +1,5 @@
-import { createRecord, database, deleteRecord, getRecord, getRecords, updateRecord, withTransaction } from './database.mjs';
+import { createRecord, database, deleteRecord, entityDefinitions, getRecord, getRecords, updateRecord, withTransaction } from './database.mjs';
+import { paginate, queryRecords } from './query.mjs';
 import { createLocalAccount, createLoginLink, disableAccount, ensureLocalAccount, getAccountForUser, setAccountActive, updateAccountCredentials, updateUser } from './auth.mjs';
 
 const isStaff = (member) => member && ['school_admin', 'it_admin'].includes(member.role);
@@ -987,6 +988,149 @@ function saveStudent(actor, body) {
   });
 }
 
+function queryBatch(actor, body) {
+  requireActor(actor);
+  const queries = Array.isArray(body.queries) ? body.queries : [];
+  if (!queries.length || queries.length > 12) {
+    throw Object.assign(new Error('Send between 1 and 12 queries'), { status: 400 });
+  }
+  return {
+    results: queries.map(({ entity, query = {}, options = {} }) => {
+      if (!entityDefinitions.has(entity)) {
+        throw Object.assign(new Error(`Unknown entity: ${entity}`), { status: 404 });
+      }
+      return paginate(queryRecords(entity, actor, query), options);
+    }),
+  };
+}
+
+function saveClass(actor, body) {
+  const member = requireMembership(actor);
+  const schoolId = member.school_id;
+  const type = body.type;
+  if (!['homeroom', 'subject'].includes(type)) {
+    throw Object.assign(new Error('Choose homeroom or subject class'), { status: 400 });
+  }
+  const entity = type === 'homeroom' ? 'HomeroomClass' : 'SubjectClass';
+  const input = body.class || {};
+  const existing = body.class_id ? getRecord(entity, String(body.class_id)) : null;
+  if (body.class_id && (!existing || existing.school_id !== schoolId)) {
+    throw Object.assign(new Error('Class not found'), { status: 404 });
+  }
+  const staff = isStaff(member);
+  if (type === 'homeroom' && !staff) {
+    throw Object.assign(new Error('Only school administrators can manage homeroom classes'), { status: 403 });
+  }
+  if (existing && !staff && !records('ClassTeacher', (link) =>
+    link.school_id === schoolId && link.class_id === existing.id && link.member_id === member.id).length) {
+    throw Object.assign(new Error('You are not authorised to edit this class'), { status: 403 });
+  }
+
+  const name = String(input.name || '').trim().replace(/\s+/g, ' ');
+  if (!name) throw Object.assign(new Error('Give the class a name'), { status: 400 });
+  const subject = String(input.subject || '').trim();
+  if (type === 'subject' && !subject) throw Object.assign(new Error('Choose the subject'), { status: 400 });
+  if (records(entity, (item) => item.school_id === schoolId && !item.archived && item.id !== existing?.id
+    && String(item.name || '').trim().toLowerCase() === name.toLowerCase()).length) {
+    throw Object.assign(new Error(`A ${type} class named "${name}" already exists`), { status: 409 });
+  }
+
+  const yearGroupId = String(input.year_group_id || '');
+  const yearGroup = yearGroupId ? getRecord('YearGroup', yearGroupId) : null;
+  if (yearGroupId && yearGroup?.school_id !== schoolId) {
+    throw Object.assign(new Error('Year group does not belong to this school'), { status: 400 });
+  }
+  const homeroomIds = type === 'subject' && Array.isArray(input.homeroom_ids) ? [...new Set(input.homeroom_ids)] : [];
+  const homerooms = homeroomIds.map((id) => getRecord('HomeroomClass', id));
+  if (homerooms.some((homeroom) => !homeroom || homeroom.school_id !== schoolId)) {
+    throw Object.assign(new Error('One or more homeroom classes are unavailable'), { status: 400 });
+  }
+
+  let teacherIds = [...new Set((Array.isArray(body.teacher_ids) ? body.teacher_ids : []).filter(Boolean))];
+  if (!existing && !staff && !teacherIds.includes(member.id)) teacherIds.push(member.id);
+  const teachers = teacherIds.map((id) => getRecord('SchoolMember', id));
+  if (teachers.some((teacher) => !teacher || teacher.school_id !== schoolId || teacher.status === 'inactive')) {
+    throw Object.assign(new Error('One or more selected teachers are unavailable'), { status: 400 });
+  }
+  const primaryId = teacherIds.includes(body.primary_id) ? body.primary_id : teacherIds[0] || '';
+
+  return withTransaction(() => {
+    const data = {
+      school_id: schoolId,
+      name,
+      year_group_id: yearGroup ? yearGroup.id : '',
+      year_group_name: yearGroup?.name || '',
+      room: String(input.room || ''),
+      notes: String(input.notes || ''),
+      ...(type === 'subject' ? {
+        subject,
+        homeroom_ids: homeroomIds,
+        homeroom_names: homerooms.map((homeroom) => homeroom.name),
+        owner_member_id: existing?.owner_member_id || member.id,
+      } : {}),
+    };
+    const saved = existing
+      ? updateRecord(entity, existing.id, data)
+      : createRecord(entity, { ...data, archived: false, student_count: 0 });
+
+    const links = records('ClassTeacher', (link) => link.school_id === schoolId && link.class_id === saved.id);
+    for (const link of links) {
+      if (!teacherIds.includes(link.member_id)) deleteRecord('ClassTeacher', link.id);
+    }
+    for (const teacher of teachers) {
+      const found = links.find((link) => link.member_id === teacher.id);
+      if (found) {
+        updateRecord('ClassTeacher', found.id, {
+          is_primary: teacher.id === primaryId,
+          class_name: saved.name,
+          member_name: teacher.full_name || found.member_name,
+        });
+      } else {
+        createRecord('ClassTeacher', {
+          school_id: schoolId,
+          class_type: type,
+          class_id: saved.id,
+          class_name: saved.name,
+          member_id: teacher.id,
+          user_id: teacher.user_id || '',
+          member_name: teacher.full_name || '',
+          is_primary: teacher.id === primaryId,
+        });
+      }
+    }
+    if (existing && existing.name !== saved.name) {
+      updateWhere('ClassMembership', (item) => item.school_id === schoolId && item.class_id === saved.id, { class_name: saved.name });
+    }
+    audit({ ...actor, member }, {
+      action: existing ? 'class.updated' : 'class.created',
+      entityType: entity,
+      entityId: saved.id,
+      summary: `${existing ? 'Updated' : 'Created'} ${type} class ${saved.name}`,
+    });
+    return { class: saved };
+  });
+}
+
+function removeClassStudent(actor, body) {
+  const member = requireMembership(actor);
+  const schoolId = member.school_id;
+  const membership = getRecord('ClassMembership', String(body.membership_id || ''));
+  if (!membership || membership.school_id !== schoolId) {
+    throw Object.assign(new Error('Student is not on this class list'), { status: 404 });
+  }
+  const classEntity = membership.class_type === 'subject' ? 'SubjectClass' : 'HomeroomClass';
+  const authorized = isStaff(member) || records('ClassTeacher', (link) =>
+    link.school_id === schoolId && link.class_id === membership.class_id && link.member_id === member.id).length > 0;
+  if (!authorized) throw Object.assign(new Error('You are not authorised to manage this class'), { status: 403 });
+  return withTransaction(() => {
+    deleteRecord('ClassMembership', membership.id);
+    const total = records('ClassMembership', (item) =>
+      item.school_id === schoolId && item.class_id === membership.class_id).length;
+    if (getRecord(classEntity, membership.class_id)) updateRecord(classEntity, membership.class_id, { student_count: total });
+    return { ok: true, student_count: total };
+  });
+}
+
 function assignStudents(actor, body) {
   const member = requireMembership(actor);
   const schoolId = member.school_id;
@@ -1563,6 +1707,9 @@ export function invokeFunction(name, actor, body = {}) {
     promoteStudents,
     saveStudent,
     assignStudents,
+    queryBatch,
+    saveClass,
+    removeClassStudent,
   };
   const handler = handlers[name];
   if (!handler) throw Object.assign(new Error(`Unknown local function: ${name}`), { status: 404 });

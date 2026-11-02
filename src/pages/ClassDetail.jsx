@@ -31,38 +31,45 @@ export default function ClassDetail({ type = 'subject' }) {
   const [importOpen, setImportOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [sortOrder, setSortOrder] = useState('name-asc');
 
   const load = useCallback(async () => {
     if (!schoolId || !id) return;
     setLoading(true);
-    const [cls, links, mem, ses, staff, yg, hr] = await Promise.all([
-      base44.entities[entity].get(id).catch(() => null),
-      base44.entities.ClassTeacher.filter({ school_id: schoolId, class_id: id }, { limit: 50 }),
-      base44.entities.ClassMembership.filter({ school_id: schoolId, class_id: id }, { limit: 300, sort: 'student_name' }),
-      base44.entities.AttendanceSession.filter({ school_id: schoolId, class_id: id }, { limit: 12, sort: '-date' }),
-      base44.entities.SchoolMember.filter({ school_id: schoolId, status: { $ne: 'inactive' } }, { limit: 200, sort: 'full_name' }),
-      base44.entities.YearGroup.filter({ school_id: schoolId }, { limit: 50, sort: 'level' }),
-      base44.entities.HomeroomClass.filter({ school_id: schoolId, archived: false }, { limit: 100, sort: 'name' }),
-    ]);
-    setKlass(cls);
-    setTeachers(links.items || []);
-    const classMembers = mem.items || [];
-    setMembers(classMembers);
-    if (classMembers.length) {
-      const profiles = await base44.entities.Student.filter({
-        school_id: schoolId,
-        id: { $in: classMembers.map((item) => item.student_id) },
-      }, { limit: 300 });
-      setStudentProfiles(profiles.items || []);
-    } else {
-      setStudentProfiles([]);
+    setLoadError('');
+    try {
+      const [cls, links, mem, ses, staff, yg, hr] = await base44.queryBatch([
+        { entity, query: { school_id: schoolId, id }, options: { limit: 1 } },
+        { entity: 'ClassTeacher', query: { school_id: schoolId, class_id: id }, options: { limit: 50 } },
+        { entity: 'ClassMembership', query: { school_id: schoolId, class_id: id }, options: { limit: 300, sort: 'student_name' } },
+        { entity: 'AttendanceSession', query: { school_id: schoolId, class_id: id }, options: { limit: 12, sort: '-date' } },
+        { entity: 'SchoolMember', query: { school_id: schoolId, status: { $ne: 'inactive' } }, options: { limit: 200, sort: 'full_name' } },
+        { entity: 'YearGroup', query: { school_id: schoolId }, options: { limit: 50, sort: 'level' } },
+        { entity: 'HomeroomClass', query: { school_id: schoolId, archived: false }, options: { limit: 100, sort: 'name' } },
+      ]);
+      setKlass(cls.items?.[0] || null);
+      setTeachers(links.items || []);
+      const classMembers = mem.items || [];
+      setMembers(classMembers);
+      setSessions(ses.items || []);
+      setStaffList(staff.items || []);
+      setYearGroups(yg.items || []);
+      setHomerooms(hr.items || []);
+      if (classMembers.length) {
+        const profiles = await base44.entities.Student.filter({
+          school_id: schoolId,
+          id: { $in: classMembers.map((item) => item.student_id) },
+        }, { limit: 300 });
+        setStudentProfiles(profiles.items || []);
+      } else {
+        setStudentProfiles([]);
+      }
+    } catch (err) {
+      setLoadError(err.message || 'Could not load this class.');
+    } finally {
+      setLoading(false);
     }
-    setSessions(ses.items || []);
-    setStaffList(staff.items || []);
-    setYearGroups(yg.items || []);
-    setHomerooms(hr.items || []);
-    setLoading(false);
   }, [schoolId, id, entity]);
 
   useEffect(() => { load(); }, [load]);
@@ -177,17 +184,28 @@ export default function ClassDetail({ type = 'subject' }) {
   };
 
   const removeStudent = async (m) => {
-    await base44.entities.ClassMembership.delete(m.id);
-    await base44.entities[entity].update(id, { student_count: Math.max(0, members.length - 1) });
-    notifySuccess('Student removed', `${m.student_name} removed from the class.`);
-    load();
+    try {
+      const result = await base44.functions.invoke('removeClassStudent', { membership_id: m.id });
+      if (result.data?.error) throw new Error(result.data.error);
+      notifySuccess('Student removed', `${m.student_name} removed from the class.`);
+      load();
+    } catch (err) {
+      notifyError('Could not remove student', err.response?.data?.error || err.message);
+    }
   };
 
   if (loading && !klass) {
     return <AppShell title="Class"><p className="text-sm text-muted-foreground">Loading class…</p></AppShell>;
   }
   if (!klass) {
-    return <AppShell title="Class"><p className="text-sm text-muted-foreground">This class could not be found.</p></AppShell>;
+    return (
+      <AppShell title="Class">
+        <div className="flex items-center gap-3 text-sm text-muted-foreground">
+          <span>{loadError || 'This class could not be found.'}</span>
+          {loadError && <Button size="sm" variant="outline" onClick={load}>Retry</Button>}
+        </div>
+      </AppShell>
+    );
   }
 
   const backTo = type === 'subject' ? '/subject-classes' : '/homerooms';

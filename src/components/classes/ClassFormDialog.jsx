@@ -18,10 +18,12 @@ export default function ClassFormDialog({ open, onOpenChange, type = 'subject', 
   const [primaryId, setPrimaryId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [teachersLoaded, setTeachersLoaded] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setError('');
+    setTeachersLoaded(!klass);
     setForm({
       name: klass?.name || '',
       subject: klass?.subject || '',
@@ -30,18 +32,26 @@ export default function ClassFormDialog({ open, onOpenChange, type = 'subject', 
       notes: klass?.notes || '',
       homeroom_ids: klass?.homeroom_ids || [],
     });
+    let cancelled = false;
     const loadTeachers = async () => {
-      if (klass) {
+      if (!klass) {
+        setTeacherIds(member ? [member.id] : []);
+        setPrimaryId(member?.id || '');
+        return;
+      }
+      try {
         const links = await base44.entities.ClassTeacher.filter({ school_id: schoolId, class_id: klass.id }, { limit: 50 });
+        if (cancelled) return;
         const items = links.items || [];
         setTeacherIds(items.map((l) => l.member_id));
         setPrimaryId(items.find((l) => l.is_primary)?.member_id || items[0]?.member_id || '');
-      } else {
-        setTeacherIds(member ? [member.id] : []);
-        setPrimaryId(member?.id || '');
+        setTeachersLoaded(true);
+      } catch (err) {
+        if (!cancelled) setError(`Could not load the current teachers: ${err.message}`);
       }
     };
     loadTeachers();
+    return () => { cancelled = true; };
   }, [open, klass, schoolId, member]);
 
   const toggleHomeroom = (id) => {
@@ -58,62 +68,25 @@ export default function ClassFormDialog({ open, onOpenChange, type = 'subject', 
     setBusy(true);
     setError('');
     try {
-      const yg = yearGroups.find((g) => g.id === form.year_group_id);
-      const chosenHomerooms = homerooms.filter((h) => form.homeroom_ids.includes(h.id));
-      const base = {
-        school_id: schoolId,
-        name: form.name.trim(),
-        year_group_id: form.year_group_id || '',
-        year_group_name: yg?.name || '',
-        room: form.room || '',
-        notes: form.notes || '',
-      };
-      const payload = type === 'subject'
-        ? {
-          ...base,
-          subject: form.subject.trim(),
+      const result = await base44.functions.invoke('saveClass', {
+        type,
+        class_id: klass?.id || '',
+        class: {
+          name: form.name,
+          subject: form.subject,
+          year_group_id: form.year_group_id,
+          room: form.room,
+          notes: form.notes,
           homeroom_ids: form.homeroom_ids,
-          homeroom_names: chosenHomerooms.map((h) => h.name),
-          owner_member_id: klass?.owner_member_id || member?.id || '',
-        }
-        : base;
-
-      let saved = klass;
-      if (klass) {
-        saved = await base44.entities[type === 'subject' ? 'SubjectClass' : 'HomeroomClass'].update(klass.id, payload);
-      } else {
-        saved = await base44.entities[type === 'subject' ? 'SubjectClass' : 'HomeroomClass'].create({ ...payload, archived: false, student_count: 0 });
-      }
-
-      if (type === 'subject' || teacherIds.length || (klass && teacherIds.length === 0)) {
-        const existing = await base44.entities.ClassTeacher.filter({ school_id: schoolId, class_id: saved.id }, { limit: 50 });
-        const existingItems = existing.items || [];
-        for (const link of existingItems) {
-          if (!teacherIds.includes(link.member_id)) await base44.entities.ClassTeacher.delete(link.id);
-        }
-        for (const tid of teacherIds) {
-          const memberRec = teachers.find((t) => t.id === tid);
-          const found = existingItems.find((l) => l.member_id === tid);
-          if (found) {
-            await base44.entities.ClassTeacher.update(found.id, { is_primary: tid === primaryId });
-          } else {
-            await base44.entities.ClassTeacher.create({
-              school_id: schoolId,
-              class_type: type,
-              class_id: saved.id,
-              class_name: saved.name,
-              member_id: tid,
-              user_id: memberRec?.user_id || '',
-              member_name: memberRec?.full_name || '',
-              is_primary: tid === primaryId,
-            });
-          }
-        }
-      }
-
+        },
+        teacher_ids: teacherIds,
+        primary_id: primaryId,
+      });
+      if (result.data?.error) throw new Error(result.data.error);
+      const saved = result.data.class;
       notifySuccess(klass ? 'Class updated' : 'Class created', saved.name);
-      onSaved(saved);
       onOpenChange(false);
+      await onSaved?.(saved);
     } catch (err) {
       setError(err.response?.data?.error || err.message);
     } finally {
@@ -189,7 +162,7 @@ export default function ClassFormDialog({ open, onOpenChange, type = 'subject', 
           {error && <p className="text-sm text-destructive sm:col-span-2">{error}</p>}
           <DialogFooter className="sm:col-span-2">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" disabled={busy}>{busy ? 'Saving…' : klass ? 'Save changes' : 'Create class'}</Button>
+            <Button type="submit" disabled={busy || !teachersLoaded}>{busy ? 'Saving…' : klass ? 'Save changes' : 'Create class'}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

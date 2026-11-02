@@ -18,23 +18,30 @@ export default function Homerooms() {
   const [teachers, setTeachers] = useState([]);
   const [links, setLinks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
 
   const load = useCallback(async () => {
     if (!schoolId) return;
     setLoading(true);
-    const [cls, yg, staff, ct] = await Promise.all([
-      base44.entities.HomeroomClass.filter({ school_id: schoolId, archived: false }, { limit: 100, sort: 'name' }),
-      base44.entities.YearGroup.filter({ school_id: schoolId }, { limit: 50, sort: 'level' }),
-      base44.entities.SchoolMember.filter({ school_id: schoolId, role: { $ne: 'school_admin' } }, { limit: 200, sort: 'full_name' }),
-      base44.entities.ClassTeacher.filter({ school_id: schoolId, class_type: 'homeroom' }, { limit: 400 }),
-    ]);
-    setClasses(cls.items || []);
-    setYearGroups(yg.items || []);
-    setTeachers((staff.items || []).filter((s) => s.status !== 'inactive'));
-    setLinks(ct.items || []);
-    setLoading(false);
+    setLoadError('');
+    try {
+      const [cls, yg, staff, ct] = await base44.queryBatch([
+        { entity: 'HomeroomClass', query: { school_id: schoolId, archived: false }, options: { limit: 100, sort: 'name' } },
+        { entity: 'YearGroup', query: { school_id: schoolId }, options: { limit: 50, sort: 'level' } },
+        { entity: 'SchoolMember', query: { school_id: schoolId, role: { $ne: 'school_admin' } }, options: { limit: 200, sort: 'full_name' } },
+        { entity: 'ClassTeacher', query: { school_id: schoolId, class_type: 'homeroom' }, options: { limit: 400 } },
+      ]);
+      setClasses(cls.items || []);
+      setYearGroups(yg.items || []);
+      setTeachers((staff.items || []).filter((s) => s.status !== 'inactive'));
+      setLinks(ct.items || []);
+    } catch (err) {
+      setLoadError(err.message || 'Could not load homeroom classes.');
+    } finally {
+      setLoading(false);
+    }
   }, [schoolId]);
 
   useEffect(() => { load(); }, [load]);
@@ -54,7 +61,16 @@ export default function Homerooms() {
         actions={isStaff ? <Button size="sm" onClick={() => { setEditing(null); setOpen(true); }}><Plus className="mr-1.5 h-3.5 w-3.5" />New homeroom</Button> : null}
       />
 
-      {visible.length === 0 && !loading ? (
+      {loadError && (
+        <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          <span>{loadError}</span>
+          <Button size="sm" variant="outline" onClick={load}>Retry</Button>
+        </div>
+      )}
+
+      {loading && classes.length === 0 && !loadError ? (
+        <p className="text-sm text-muted-foreground">Loading homeroom classes…</p>
+      ) : visible.length === 0 && !loading && !loadError ? (
         <EmptyState icon={GraduationCap} title="No homeroom classes" description={isStaff ? 'Create your first form class and assign its homeroom teachers.' : 'You have not been assigned to a homeroom class yet.'} />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

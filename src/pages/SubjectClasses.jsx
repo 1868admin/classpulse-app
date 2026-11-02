@@ -22,6 +22,7 @@ export default function SubjectClasses() {
   const [teachers, setTeachers] = useState([]);
   const [links, setLinks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [term, setTerm] = useState('');
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -30,19 +31,25 @@ export default function SubjectClasses() {
   const load = useCallback(async () => {
     if (!schoolId) return;
     setLoading(true);
-    const [cls, yg, hr, staff, ct] = await Promise.all([
-      base44.entities.SubjectClass.filter({ school_id: schoolId, archived: false }, { limit: 200, sort: 'name' }),
-      base44.entities.YearGroup.filter({ school_id: schoolId }, { limit: 50, sort: 'level' }),
-      base44.entities.HomeroomClass.filter({ school_id: schoolId, archived: false }, { limit: 100, sort: 'name' }),
-      base44.entities.SchoolMember.filter({ school_id: schoolId, status: { $ne: 'inactive' } }, { limit: 200, sort: 'full_name' }),
-      base44.entities.ClassTeacher.filter({ school_id: schoolId, class_type: 'subject' }, { limit: 500 }),
-    ]);
-    setClasses(cls.items || []);
-    setYearGroups(yg.items || []);
-    setHomerooms(hr.items || []);
-    setTeachers(staff.items || []);
-    setLinks(ct.items || []);
-    setLoading(false);
+    setLoadError('');
+    try {
+      const [cls, yg, hr, staff, ct] = await base44.queryBatch([
+        { entity: 'SubjectClass', query: { school_id: schoolId, archived: false }, options: { limit: 200, sort: 'name' } },
+        { entity: 'YearGroup', query: { school_id: schoolId }, options: { limit: 50, sort: 'level' } },
+        { entity: 'HomeroomClass', query: { school_id: schoolId, archived: false }, options: { limit: 100, sort: 'name' } },
+        { entity: 'SchoolMember', query: { school_id: schoolId, status: { $ne: 'inactive' } }, options: { limit: 200, sort: 'full_name' } },
+        { entity: 'ClassTeacher', query: { school_id: schoolId, class_type: 'subject' }, options: { limit: 500 } },
+      ]);
+      setClasses(cls.items || []);
+      setYearGroups(yg.items || []);
+      setHomerooms(hr.items || []);
+      setTeachers(staff.items || []);
+      setLinks(ct.items || []);
+    } catch (err) {
+      setLoadError(err.message || 'Could not load subject classes.');
+    } finally {
+      setLoading(false);
+    }
   }, [schoolId]);
 
   useEffect(() => { load(); }, [load]);
@@ -75,7 +82,16 @@ export default function SubjectClasses() {
 
       <div className="mb-3 max-w-sm"><SearchInput value={term} onChange={setTerm} placeholder="Search class or subject…" /></div>
 
-      {visible.length === 0 && !loading ? (
+      {loadError && (
+        <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          <span>{loadError}</span>
+          <Button size="sm" variant="outline" onClick={load}>Retry</Button>
+        </div>
+      )}
+
+      {loading && classes.length === 0 && !loadError ? (
+        <p className="text-sm text-muted-foreground">Loading subject classes…</p>
+      ) : visible.length === 0 && !loading && !loadError ? (
         <EmptyState
           icon={BookOpen}
           title="No subject classes"
