@@ -98,7 +98,7 @@ export default function Staff() {
                     <td className="max-w-[180px] truncate px-3 py-2.5 text-xs text-muted-foreground">{m.subject_specialisms || '—'}</td>
                     <td className="px-3 py-2.5">
                       <div className="flex items-center justify-end gap-1">
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => createLink(m)} aria-label="Create sign-in link" title="Create one-click sign-in link">
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => createLink(m)} aria-label="Create setup or password reset link" title="Create account setup / password reset link">
                           <Link2 className="h-3.5 w-3.5" />
                         </Button>
                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditing(m); setDialogOpen(true); }} aria-label="Edit">

@@ -11,7 +11,8 @@ import {
   revokeSession,
   recoverInitialAdmin,
   signIn,
-  signInWithLink,
+  completeLoginLink,
+  getLoginLinkInfo,
 } from './auth.mjs';
 import {
   createRecord,
@@ -187,9 +188,14 @@ async function handleAuth(request, response, parts) {
     respond(response, 200, { ok: true }, { 'Set-Cookie': cookieHeader(session.token, request) });
     return true;
   }
+  if (parts[2] === 'link-info' && method === 'POST') {
+    const body = await readJson(request);
+    respond(response, 200, getLoginLinkInfo(body.token));
+    return true;
+  }
   if (parts[2] === 'link-login' && method === 'POST') {
     const body = await readJson(request);
-    const session = signInWithLink(body.token);
+    const session = completeLoginLink(body.token, body.password);
     respond(response, 200, { ok: true }, { 'Set-Cookie': cookieHeader(session.token, request) });
     return true;
   }

@@ -223,6 +223,7 @@ function manageStaff(actor, body) {
         full_name: fullName,
         role,
         status: 'active',
+        password_set: hasPassword,
         username: accountUsername,
         phone: body.phone || '',
         subject_specialisms: body.subject_specialisms || '',
@@ -282,6 +283,7 @@ function manageStaff(actor, body) {
           patch.status = 'active';
         }
       }
+      if (body.password) patch.password_set = true;
       patch.username = username;
       const updated = updateRecord('SchoolMember', target.id, patch);
       if (target.user_id) {
@@ -325,15 +327,16 @@ function manageStaff(actor, body) {
         email: target.user_email,
         preferredUsername: target.username,
       });
-      const link = createLoginLink(target.user_id);
-      updateRecord('SchoolMember', target.id, { username, status: 'active' });
+      const mode = target.password_set === false ? 'setup' : 'reset';
+      const link = createLoginLink(target.user_id, mode);
+      updateRecord('SchoolMember', target.id, { username });
       audit({ ...actor, member }, {
         action: 'staff.login_link_created',
         entityType: 'SchoolMember',
         entityId: target.id,
-        summary: `Created a one-time sign-in link for ${target.full_name}`,
+        summary: `Created a password ${mode} link for ${target.full_name}`,
       });
-      return { token: link.token, expires_at: new Date(link.expiresAt).toISOString() };
+      return { token: link.token, mode, username, expires_at: new Date(link.expiresAt).toISOString() };
     });
   }
 

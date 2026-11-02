@@ -19,14 +19,16 @@ export default function StaffLinkDialog({ link, onClose }) {
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-lg">
-        <DialogHeader><DialogTitle>Sign-in link for {link.name}</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{link.mode === 'reset' ? 'Password reset link' : 'Account setup link'} for {link.name}</DialogTitle></DialogHeader>
         <div className="space-y-3 text-sm">
           <div className="rounded-lg border border-border bg-muted/40 p-3">
             <p className="break-all font-mono text-xs">{url}</p>
           </div>
           <p className="text-[13px] text-muted-foreground">
-            Whoever opens this link is signed in as {link.name}. It works once and expires on {new Date(link.expires_at).toLocaleString()}.
-            Send it privately, and generate a new one any time they need access again.
+            {link.mode === 'reset'
+              ? `${link.name} will see their username (${link.username}) and choose a new password. Their old password stops working once they do.`
+              : `${link.name} will see their username (${link.username}) and choose their own password.`}
+            {' '}The link works once and expires on {new Date(link.expires_at).toLocaleString()}. Send it privately.
           </p>
         </div>
         <DialogFooter>

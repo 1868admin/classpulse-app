@@ -304,27 +304,48 @@ export function updateUser(userId, patch) {
   return updateRecord('User', userId, patch);
 }
 
-export function createLoginLink(userId) {
+export function createLoginLink(userId, mode = 'setup') {
   const token = randomBytes(32).toString('base64url');
   const expiresAt = Date.now() + LOGIN_LINK_TTL_MS;
-  updateUser(userId, { login_link_hash: hashToken(token), login_link_expires: expiresAt });
+  updateUser(userId, {
+    login_link_hash: hashToken(token),
+    login_link_expires: expiresAt,
+    login_link_mode: mode === 'reset' ? 'reset' : 'setup',
+  });
   return { token, expiresAt };
 }
 
-export function signInWithLink(token) {
-  const invalid = () => Object.assign(new Error('This sign-in link is invalid or has expired. Ask your administrator for a new one.'), { status: 401 });
+function findUserByLink(token) {
+  const invalid = () => Object.assign(new Error('This link is invalid or has expired. Ask your administrator for a new one.'), { status: 401 });
   if (typeof token !== 'string' || token.length < 20 || token.length > 128) throw invalid();
   const hash = hashToken(token);
-  for (const row of database.prepare('SELECT id, data FROM records WHERE entity = ?').all('User')) {
+  for (const row of database.prepare('SELECT data FROM records WHERE entity = ?').all('User')) {
     const user = JSON.parse(row.data);
     if (user.login_link_hash !== hash) continue;
-    // Links are single-use: clear before issuing the session.
-    updateUser(user.id, { login_link_hash: '', login_link_expires: 0 });
-    const account = database.prepare('SELECT active FROM accounts WHERE user_id = ?').get(user.id);
+    const account = database.prepare('SELECT username, active FROM accounts WHERE user_id = ?').get(user.id);
     if (Number(user.login_link_expires) <= Date.now() || !account?.active) throw invalid();
-    return createSession(user.id);
+    return { user, account };
   }
   throw invalid();
+}
+
+export function getLoginLinkInfo(token) {
+  const { user, account } = findUserByLink(token);
+  return { username: account.username, full_name: user.full_name || '', mode: user.login_link_mode || 'setup' };
+}
+
+export function completeLoginLink(token, password) {
+  const { user, account } = findUserByLink(token);
+  if (typeof password !== 'string' || password.length < 8 || password.length > 256) {
+    throw Object.assign(new Error('Passwords must be between 8 and 256 characters'), { status: 400 });
+  }
+  updateAccountCredentials({ userId: user.id, username: account.username, password });
+  updateUser(user.id, { login_link_hash: '', login_link_expires: 0, login_link_mode: '' });
+  for (const row of database.prepare('SELECT data FROM records WHERE entity = ?').all('SchoolMember')) {
+    const member = JSON.parse(row.data);
+    if (member.user_id === user.id) updateRecord('SchoolMember', member.id, { password_set: true, status: 'active' });
+  }
+  return createSession(user.id);
 }
 
 export function ensureLocalAccount({ userId, fullName, email = '', preferredUsername = '' }) {

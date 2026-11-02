@@ -101,7 +101,7 @@ export default function StaffDialog({ open, onOpenChange, staff, canGrantAdmin, 
           <div>
             <Label className="mb-1.5 block text-[13px]">{staff ? 'Set / reset password' : 'Default password'}</Label>
             <Input type="password" autoComplete="new-password" value={form.password} onChange={set('password')} placeholder={staff?.has_local_login ? 'Leave blank to keep current' : staff ? 'At least 8 characters' : 'Optional — leave blank to use a sign-in link'} required={!!staff && !staff.has_local_login} minLength={8} />
-            {!staff && <p className="mt-1 text-[11px] text-muted-foreground">Leave blank to skip the password, then use the link button on the Staff page to give them a one-click sign-in link.</p>}
+            {!staff && <p className="mt-1 text-[11px] text-muted-foreground">Leave blank to let them choose their own: use the link button on the Staff page to send a setup link.</p>}
           </div>
           <div>
             <Label className="mb-1.5 block text-[13px]">Phone</Label>
