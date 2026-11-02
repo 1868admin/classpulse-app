@@ -4,7 +4,7 @@
   "outputDirectory": "dist",
   "regions": ["iad1"],
   "functions": {
-    "api/[...path].mjs": {
+    "api/**/*.mjs": {
       "includeFiles": "{base44/entities/**/*.jsonc,HomeroomClass.jsonc}",
       "maxDuration": 60
     }
