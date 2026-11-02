@@ -1529,7 +1529,7 @@ export function invokeFunction(name, actor, body = {}) {
     saveTimetableEntries,
     submitAttendance,
     bulkStudentAction,
-    importStudents,
+    importStudents, // Ensure this key is present and points to function importStudents
     promoteStudents,
     saveStudent,
     assignStudents,

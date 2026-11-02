@@ -80,51 +80,54 @@ export default function ImportStudentsDialog({
     downloadFile('classpulse-student-import-template.xlsx', content, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   };
 
-  const onFile = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setFileName(file.name);
-    try {
-      const extension = file.name.split('.').at(-1)?.toLowerCase();
-      let parsed;
-      if (extension === 'csv') {
-        parsed = parseCSV(await file.text());
-      } else if (['xls', 'xlsx'].includes(extension)) {
-        const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
-        const sheetName = workbook.SheetNames[0];
-        if (!sheetName) throw new Error('The spreadsheet does not contain a worksheet.');
-        const matrix = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '', raw: false });
-        const nonEmpty = matrix.filter((row) => row.some((value) => String(value).trim()));
-        const headers = (nonEmpty.shift() || []).map((value) => String(value).trim());
-        parsed = {
-          headers,
-          rows: nonEmpty.map((row) => Object.fromEntries(headers.map((header, index) => [header, String(row[index] ?? '').trim()]))),
-        };
-      } else {
-        notifyError('Unsupported file', 'Choose an .xlsx, .xls or .csv file.');
-        return;
-      }
-      setHeaders(parsed.headers);
-      setRows(parsed.rows);
+ // In src/components/students/ImportStudentsDialog.jsx
+
+const onFile = async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  setFileName(file.name);
+  try {
+    const extension = file.name.split('.').at(-1)?.toLowerCase();
+    let parsed = { headers: [], rows: [] };
+    
+    if (extension === 'csv') {
+      parsed = parseCSV(await file.text());
+    } else if (['xls', 'xlsx'].includes(extension)) {
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
+      const sheetName = workbook.SheetNames[0];
+      if (!sheetName) throw new Error('Worksheet empty');
+      const matrix = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '', raw: false });
+      const nonEmpty = matrix.filter((row) => row.some((value) => String(value).trim()));
+      const extractedHeaders = (nonEmpty.shift() || []).map((value) => String(value).trim());
       
-      const auto = {};
-      visibleFields.forEach((f) => {
-        const fieldKeyClean = f.key.toLowerCase().replace(/_/g, '');
-        const fieldLabelClean = f.label.toLowerCase().replace(/[^a-z0-9]/g, '');
-        const match = parsed.headers.find((h) => {
-          const headerClean = h.toLowerCase().replace(/[^a-z0-9]/g, '');
-          return headerClean === fieldKeyClean || headerClean === fieldLabelClean || headerClean.includes(fieldKeyClean);
-        });
-        if (match) auto[f.key] = match;
-      });
-
-      setMapping(auto);
-      setResult(null);
-    } catch (error) {
-      notifyError('Could not read spreadsheet', error.message);
+      parsed = {
+        headers: extractedHeaders,
+        rows: nonEmpty.map((row) => Object.fromEntries(extractedHeaders.map((header, idx) => [header, String(row[idx] ?? '').trim()]))),
+      };
     }
-  };
 
+    if (!parsed.headers.length) {
+      throw new Error('No headers found in the uploaded file');
+    }
+
+    setHeaders(parsed.headers);
+    setRows(parsed.rows);
+
+    // Auto-map columns
+    const auto = {};
+    visibleFields.forEach((f) => {
+      const fieldKeyClean = f.key.toLowerCase().replace(/_/g, '');
+      const match = parsed.headers.find((h) => h.toLowerCase().replace(/[^a-z0-9]/g, '').includes(fieldKeyClean));
+      if (match) auto[f.key] = match;
+    });
+    setMapping(auto);
+    setResult(null);
+  } catch (error) {
+    notifyError('Could not read spreadsheet', error.message);
+    setHeaders([]);
+    setRows([]);
+  }
+};
   const mapped = rows.map((r) => {
     const out = {};
     visibleFields.forEach((f) => { if (mapping[f.key]) out[f.key] = r[mapping[f.key]] || ''; });
@@ -218,13 +221,19 @@ export default function ImportStudentsDialog({
           class_id: targetClassId,
         },
       });
-      if (res.data?.error) throw new Error(res.data.error);
-      setResult(res.data);
-      if (res.data.imported > 0) {
-        notifySuccess('Import complete', `${res.data.imported} student(s) added.`);
-        onImported();
+
+      const payload = res?.data ?? res;
+      if (payload?.error) throw new Error(payload.error);
+      setResult(payload);
+
+      if (payload?.imported > 0) {
+        notifySuccess('Import complete', `${payload.imported} student(s) added.`);
+        if (typeof onImported === 'function') onImported();
       } else {
-        notifyError('Import notice', `0 students imported. ${res.data.skipped} skipped.`);
+        const errorDetail = payload?.errors?.length 
+          ? payload.errors.map(e => typeof e === 'string' ? e : `Row ${e.row}: ${e.reason}`).join('; ') 
+          : 'Record already exists or was skipped.';
+        notifyError('Import skipped', `0 students imported. ${errorDetail}`);
       }
       const p = await base44.entities.ImportJob.filter({ school_id: schoolId, type: 'students' }, { limit: 5, sort: '-created_date' });
       setHistory(p.items || []);
@@ -273,7 +282,7 @@ export default function ImportStudentsDialog({
                 {allProblems.length ? `${allProblems.length} issue(s) — fix before importing` : `${mapped.length} rows ready to import`}
               </p>
               <Button size="sm" disabled={!canImport || busy} onClick={() => setConfirmOpen(true)}>
-                Import {mapped.length} student(s)
+                {busy ? 'Importing…' : `Import ${mapped.length} student(s)`}
               </Button>
             </div>
           </>
@@ -281,10 +290,10 @@ export default function ImportStudentsDialog({
 
         {result && (
           <div className={`rounded-xl border p-4 text-xs ${result.imported > 0 ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
-            <p className="font-semibold">Import finished: {result.imported} student(s) added, {result.skipped} skipped.</p>
+            <p className="font-semibold">Import finished: {result.imported || 0} student(s) added, {result.skipped || 0} skipped.</p>
             {result.errors?.length > 0 && (
               <div className="mt-2">
-                <p className="font-medium text-destructive">Skipped row details:</p>
+                <p className="font-medium text-destructive">Details / Reasons:</p>
                 <ul className="mt-1 list-disc list-inside space-y-0.5 max-h-32 overflow-y-auto">
                   {result.errors.map((e, i) => (
                     <li key={i}>{typeof e === 'string' ? e : `Row ${e.row}: ${e.reason}`}</li>
