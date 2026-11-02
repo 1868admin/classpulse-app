@@ -272,6 +272,52 @@ export default function ImportStudentsDialog({
 
         {headers.length > 0 && (
           <div className="space-y-4 border-t pt-3">
+            {targetClassType !== 'homeroom' && (
+              <div className="rounded-xl border border-border p-3">
+                <p className="mb-2 text-[13px] font-semibold">Assign all students in this file to</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <Label className="mb-1 block text-[12px]">Year group</Label>
+                    <Select
+                      value={yearGroupId || 'none'}
+                      onValueChange={(v) => {
+                        const next = v === 'none' ? '' : v;
+                        setYearGroupId(next);
+                        const current = homerooms.find((h) => h.id === homeroomId);
+                        if (next && current?.year_group_id && current.year_group_id !== next) setHomeroomId('');
+                      }}
+                    >
+                      <SelectTrigger className="h-8"><SelectValue placeholder="No year group" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No year group</SelectItem>
+                        {yearGroups.map((g) => <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="mb-1 block text-[12px]">Homeroom class</Label>
+                    <Select
+                      value={homeroomId || 'none'}
+                      onValueChange={(v) => {
+                        const next = v === 'none' ? '' : v;
+                        setHomeroomId(next);
+                        const picked = homerooms.find((h) => h.id === next);
+                        if (picked?.year_group_id) setYearGroupId(picked.year_group_id);
+                      }}
+                    >
+                      <SelectTrigger className="h-8"><SelectValue placeholder="No homeroom" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No homeroom</SelectItem>
+                        {homerooms
+                          .filter((h) => !yearGroupId || !h.year_group_id || h.year_group_id === yearGroupId)
+                          .map((h) => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="rounded-xl border border-border p-3">
               <p className="mb-2 text-[13px] font-semibold">Column mapping</p>
               <div className="grid gap-2 sm:grid-cols-2">
