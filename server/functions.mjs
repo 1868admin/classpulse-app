@@ -780,9 +780,10 @@ function allocateStudentId(schoolId, yearGroupId, homeroomId) {
     .filter((studentId) => studentId.startsWith(prefix))
     .map((studentId) => Number(studentId.slice(prefix.length)))
     .filter((sequence) => Number.isSafeInteger(sequence) && sequence > 0);
-  const savedSequence = database.prepare(
-    'SELECT next_value FROM student_id_sequences WHERE school_id = ? AND cohort_key = ?',
-  ).get(schoolId, cohortKey)?.next_value || 1;
+
+  const sequenceRecord = find('StudentIdSequence', (item) => item.school_id === schoolId && item.cohort_key === cohortKey);
+  const savedSequence = sequenceRecord?.next_value || 1;
+
   let sequence = Math.max(savedSequence, (existing.length ? Math.max(...existing) : 0) + 1);
   let studentId = `${prefix}${String(sequence).padStart(4, '0')}`;
   const usedIds = new Set(records('Student', (student) => student.school_id === schoolId)
@@ -791,11 +792,13 @@ function allocateStudentId(schoolId, yearGroupId, homeroomId) {
     sequence += 1;
     studentId = `${prefix}${String(sequence).padStart(4, '0')}`;
   }
-  database.prepare(`
-    INSERT INTO student_id_sequences (school_id, cohort_key, next_value)
-    VALUES (?, ?, ?)
-    ON CONFLICT(school_id, cohort_key) DO UPDATE SET next_value = excluded.next_value
-  `).run(schoolId, cohortKey, sequence + 1);
+
+  if (sequenceRecord) {
+    updateRecord('StudentIdSequence', sequenceRecord.id, { next_value: sequence + 1 });
+  } else {
+    createRecord('StudentIdSequence', { school_id: schoolId, cohort_key: cohortKey, next_value: sequence + 1 });
+  }
+
   return { studentId, graduatingYear };
 }
 
@@ -1214,6 +1217,7 @@ function importStudents(actor, body) {
     return { imported: created.length, skipped: skipped.length, errors: skipped, student_ids: created.map((student) => student.id), job };
   });
 }
+
 function promoteStudents(actor, body) {
   const member = requireMembership(actor);
   const schoolId = member.school_id;
