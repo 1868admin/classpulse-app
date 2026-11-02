@@ -1,60 +1,65 @@
-async function request(path, { method = 'GET', body } = {}) {
-  const response = await fetch(`/api${path}`, {
-    method,
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    credentials: 'same-origin',
-  });
-  const data = response.status === 204 ? null : await response.json();
-  if (!response.ok) {
-    const error = new Error(data?.error || `Request failed (${response.status})`);
-    error.status = response.status;
-    error.response = { status: response.status, data };
-    throw error;
-  }
-  return data;
-}
+import { supabase } from '@/lib/supabase';
 
 const entities = new Proxy({}, {
   get(_target, entity) {
     if (typeof entity !== 'string') return undefined;
-    const path = `/entities/${encodeURIComponent(entity)}`;
+    
     return {
-      filter: (query = {}, options = {}) => request(`${path}/filter`, { method: 'POST', body: { query, options } }),
-      count: (query = {}) => request(`${path}/count`, { method: 'POST', body: { query } }),
-      get: (id) => request(`${path}/${encodeURIComponent(id)}`),
-      create: (record) => request(path, { method: 'POST', body: record }),
-      bulkCreate: (records) => request(`${path}/bulk`, { method: 'POST', body: records }),
-      update: (id, patch) => request(`${path}/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch }),
-      updateMany: (query, update) => request(`${path}/update-many`, { method: 'PATCH', body: { query, update } }),
-      delete: (id) => request(`${path}/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-      deleteMany: (query) => request(`${path}/delete-many`, { method: 'POST', body: { query } }),
+      filter: async (query = {}, options = {}) => {
+        let req = supabase.from(entity).select('*');
+        if (Object.keys(query).length > 0) req = req.match(query);
+        const { data, error } = await req;
+        if (error) throw error;
+        return data;
+      },
+      get: async (id) => {
+        const { data, error } = await supabase.from(entity).select('*').eq('id', id).single();
+        if (error) throw error;
+        return data;
+      },
+      create: async (record) => {
+        const { data, error } = await supabase.from(entity).insert(record).select().single();
+        if (error) throw error;
+        return data;
+      },
+      bulkCreate: async (records) => {
+        const { data, error } = await supabase.from(entity).insert(records).select();
+        if (error) throw error;
+        return data;
+      },
+      update: async (id, patch) => {
+        const { data, error } = await supabase.from(entity).update(patch).eq('id', id).select().single();
+        if (error) throw error;
+        return data;
+      },
+      delete: async (id) => {
+        const { error } = await supabase.from(entity).delete().eq('id', id);
+        if (error) throw error;
+        return true;
+      }
     };
   },
 });
 
 export const base44 = {
   entities,
-  functions: {
-    invoke: async (name, payload = {}) => ({
-      data: await request(`/functions/${encodeURIComponent(name)}`, { method: 'POST', body: payload }),
-    }),
-  },
   auth: {
-    loginViaEmailPassword: (username, password) =>
-      request('/auth/login', { method: 'POST', body: { username, password } }),
-    me: () => request('/auth/me'),
+    loginViaEmailPassword: async (email, password) => {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw Object.assign(new Error(error.message), { status: error.status || 401 });
+      return data.user;
+    },
+    me: async () => {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      if (error || !user) throw Object.assign(new Error('Unauthorized'), { status: 401 });
+      return user;
+    },
     isAuthenticated: async () => {
-      try {
-        await request('/auth/me');
-        return true;
-      } catch (error) {
-        if (error.status === 401) return false;
-        throw error;
-      }
+      const { data: { session } } = await supabase.auth.getSession();
+      return !!session;
     },
     logout: async (returnTo) => {
-      await request('/auth/logout', { method: 'POST', body: {} });
+      await supabase.auth.signOut();
       if (returnTo) window.location.assign('/login');
     },
     redirectToLogin: (returnTo) => {
