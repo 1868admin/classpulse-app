@@ -73,10 +73,7 @@ export default function ImportStudentsDialog({
     const sample = canManageSensitive
       ? ['', '', 'Alana', 'Baptiste', 'Marie', 'female', '2013-04-18', 'Joanne Baptiste', '868-555-0111', '12 Woodbrook, Port of Spain']
       : ['', 'Alana', 'Baptiste', 'Marie', 'female', '2013-04-18', 'Joanne Baptiste', '868-555-0111', '12 Woodbrook, Port of Spain'];
-    const sheet = XLSX.utils.aoa_to_sheet([
-      headers,
-      sample,
-    ]);
+    const sheet = XLSX.utils.aoa_to_sheet([headers, sample]);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, sheet, 'Students');
     const content = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
@@ -146,9 +143,6 @@ export default function ImportStudentsDialog({
     const birthNumber = String(r.birth_paper_no || '').toLowerCase().replace(/[^a-z0-9]/g, '');
     if (birthNumber && seenBirthNumbers.has(birthNumber)) problems.push(`Row ${i + 2}: duplicate Birth Paper Number in file`);
     if (birthNumber) seenBirthNumbers.add(birthNumber);
-    if (r.birth_paper_no && !/^[A-Za-z0-9][A-Za-z0-9 /-]{2,31}$/.test(String(r.birth_paper_no).trim())) {
-      problems.push(`Row ${i + 2}: Birth Paper Number has an invalid format`);
-    }
   });
 
   useEffect(() => {
@@ -190,8 +184,6 @@ export default function ImportStudentsDialog({
           }
           const person = `${[row.first_name, row.middle_name, row.surname].filter(Boolean).join(' ').toLowerCase()}|${row.date_of_birth}`;
           if (row.date_of_birth && people.has(person)) conflicts.push(`Row ${index + 2}: a student with the same name and date of birth already exists`);
-          const birthNumber = String(row.birth_paper_no || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-          if (birthNumber && existingBirthNumbers.has(birthNumber)) conflicts.push(`Row ${index + 2}: Birth Paper Number already exists`);
         });
         setExistingConflicts(conflicts);
       })
@@ -206,9 +198,7 @@ export default function ImportStudentsDialog({
   const runImport = async () => {
     setBusy(true);
     const effectiveYearGroupId = yearGroupId || defaultYearGroupId;
-    const effectiveHomeroomId = targetClassType === 'homeroom'
-      ? targetClassId
-      : homeroomId || defaultHomeroomId;
+    const effectiveHomeroomId = targetClassType === 'homeroom' ? targetClassId : homeroomId || defaultHomeroomId;
     const yg = yearGroups.find((g) => g.id === effectiveYearGroupId);
     const hr = homerooms.find((h) => h.id === effectiveHomeroomId);
     try {
@@ -226,7 +216,7 @@ export default function ImportStudentsDialog({
       });
       if (res.data?.error) throw new Error(res.data.error);
       setResult(res.data);
-      notifySuccess('Import complete', `${res.data.imported} student(s) added${targetClassType ? ` to ${targetClassType} class` : ''}.`);
+      notifySuccess('Import complete', `${res.data.imported} student(s) added.`);
       onImported();
       const p = await base44.entities.ImportJob.filter({ school_id: schoolId, type: 'students' }, { limit: 5, sort: '-created_date' });
       setHistory(p.items || []);
@@ -245,10 +235,9 @@ export default function ImportStudentsDialog({
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={downloadTemplate}><Download className="mr-1.5 h-3.5 w-3.5" />Template</Button>
           <Button size="sm" onClick={() => fileRef.current?.click()}><Upload className="mr-1.5 h-3.5 w-3.5" />Choose spreadsheet</Button>
-          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" className="hidden" onChange={onFile} />
+          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={onFile} />
           {fileName && <span className="flex items-center gap-1.5 text-xs text-muted-foreground"><FileSpreadsheet className="h-3.5 w-3.5" />{fileName} · {rows.length} row(s)</span>}
         </div>
-        <p className="text-xs text-muted-foreground">Supported formats: Excel workbook (.xlsx, .xls) and comma-separated values (.csv). Student IDs are generated automatically if left blank.</p>
 
         {headers.length > 0 && (
           <>
@@ -270,94 +259,36 @@ export default function ImportStudentsDialog({
               </div>
             </div>
 
-            <div className="grid gap-2 sm:grid-cols-2">
-              <div>
-                <Label className="mb-1.5 block text-[12px]">Assign to year group</Label>
-                <Select value={yearGroupId || 'none'} onValueChange={(v) => setYearGroupId(v === 'none' ? '' : v)}>
-                  <SelectTrigger><SelectValue placeholder="Optional" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Use file / none</SelectItem>
-                    {yearGroups.map((g) => <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              {targetClassType !== 'homeroom' && <div>
-                <Label className="mb-1.5 block text-[12px]">Assign to homeroom</Label>
-                <Select value={homeroomId || 'none'} onValueChange={(v) => setHomeroomId(v === 'none' ? '' : v)}>
-                  <SelectTrigger><SelectValue placeholder="Optional" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None</SelectItem>
-                    {homerooms.map((h) => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>}
-            </div>
-
-            <div className="max-h-56 overflow-auto rounded-xl border border-border">
-              <table className="w-full text-xs">
-                <thead className="cp-table-head sticky top-0">
-                  <tr>{visibleFields.filter((f) => mapping[f.key]).map((f) => <th key={f.key} className="px-2 py-1.5">{f.label}</th>)}</tr>
-                </thead>
-                <tbody>
-                  {mapped.slice(0, 30).map((r, i) => (
-                    <tr key={i} className="border-t border-border/60">
-                      {visibleFields.filter((f) => mapping[f.key]).map((f) => <td key={f.key} className="px-2 py-1.5">{r[f.key] || '—'}</td>)}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className={`flex items-center gap-1.5 text-xs ${allProblems.length || duplicateCheckError ? 'text-amber-600' : 'text-emerald-600'}`}>
-                {allProblems.length || duplicateCheckError ? <AlertTriangle className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-                {checkingDuplicates ? 'Checking for existing students…' : allProblems.length ? `${allProblems.length} issue(s) — fix before importing` : `${mapped.length} rows ready to import`}
+              <p className={`flex items-center gap-1.5 text-xs ${allProblems.length ? 'text-amber-600' : 'text-emerald-600'}`}>
+                {allProblems.length ? <AlertTriangle className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                {allProblems.length ? `${allProblems.length} issue(s) — fix before importing` : `${mapped.length} rows ready to import`}
               </p>
               <Button size="sm" disabled={!canImport || busy} onClick={() => setConfirmOpen(true)}>
-                {busy ? 'Importing…' : `Import ${mapped.length} student(s)`}
+                Import {mapped.length} student(s)
               </Button>
             </div>
-            {duplicateCheckError && <p className="text-xs text-destructive">{duplicateCheckError}</p>}
-            {allProblems.length > 0 && (
-              <ul className="max-h-28 overflow-auto rounded-lg bg-amber-50 p-2 text-[11px] text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-                {allProblems.slice(0, 20).map((p, i) => <li key={i}>{p}</li>)}
-              </ul>
-            )}
           </>
         )}
 
         {result && (
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
             Imported {result.imported} student(s); {result.skipped} skipped.
-            {result.errors?.length > 0 && (
-              <ul className="mt-1 list-inside list-disc">{result.errors.slice(0, 8).map((e, i) => <li key={i}>{e}</li>)}</ul>
-            )}
-            {confirmOpen && (
-              <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="confirm-import-title">
-                <div className="w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-xl">
-                  <h3 id="confirm-import-title" className="text-base font-semibold">Confirm student import</h3>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Import {mapped.length} valid student record(s)? Existing records will not be overwritten. Invalid and duplicate rows will be skipped.
-                  </p>
-                  <div className="mt-4 flex justify-end gap-2">
-                    <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={busy}>Cancel</Button>
-                    <Button onClick={() => { setConfirmOpen(false); runImport(); }} disabled={busy}>{busy ? 'Importing…' : 'Confirm import'}</Button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         )}
 
-        {history.length > 0 && (
-          <div>
-            <p className="mb-1.5 text-[13px] font-semibold">Import history</p>
-            <div className="space-y-1">
-              {history.map((h) => (
-                <p key={h.id} className="text-[11px] text-muted-foreground">
-                  {new Date(h.created_date).toLocaleString()} · {h.file_name} · {h.imported_count} imported / {h.failed_count} skipped · {h.created_by_name}
-                </p>
-              ))}
+        {/* Confirmation Modal safely moved OUTSIDE result block so it appears properly */}
+        {confirmOpen && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
+            <div className="w-full max-w-sm rounded-xl border border-border bg-card p-5 shadow-xl">
+              <h3 className="text-base font-semibold">Confirm student import</h3>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Import {mapped.length} valid student record(s)? Existing records will not be overwritten.
+              </p>
+              <div className="mt-4 flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={busy}>Cancel</Button>
+                <Button onClick={() => { setConfirmOpen(false); runImport(); }} disabled={busy}>{busy ? 'Importing…' : 'Confirm import'}</Button>
+              </div>
             </div>
           </div>
         )}
