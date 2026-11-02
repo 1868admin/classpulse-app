@@ -138,16 +138,16 @@ const postgresSchema = `
     ON records(school_id, lower(regexp_replace(data->>'birth_paper_no', '[^a-zA-Z0-9]', '', 'g')))
     WHERE entity = 'Student' AND COALESCE(data->>'birth_paper_no', '') <> '';
   CREATE UNIQUE INDEX IF NOT EXISTS records_class_membership_unique
-    ON records(school_id, COALESCE(data->>'class_type', 'homeroom'), data->>'class_id', data->>'student_id')
+    ON records(school_id, COALESCE(data->>'class_type', 'homeroom'), (data->>'class_id'), (data->>'student_id'))
     WHERE entity = 'ClassMembership';
   CREATE UNIQUE INDEX IF NOT EXISTS records_attendance_session_unique
-    ON records(school_id, data->>'session_key')
+    ON records(school_id, (data->>'session_key'))
     WHERE entity = 'AttendanceSession' AND COALESCE(data->>'session_key', '') <> '';
   CREATE UNIQUE INDEX IF NOT EXISTS records_student_enrollment_unique
     ON records(
       school_id,
       COALESCE(data->>'class_type', 'homeroom'),
-      data->>'student_id',
+      (data->>'student_id'),
       COALESCE(data->>'source_class_id', ''),
       COALESCE(data->>'destination_academic_year_id', '')
     )
