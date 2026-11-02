@@ -104,7 +104,7 @@ export default function Staff() {
       )}
 
       <p className="mt-3 text-xs text-muted-foreground">
-        Accounts are stored on this computer. Use Edit to create a password for imported staff or change an existing local password.
+        Staff sign in with a username and password; email addresses are optional. Use Edit to create a password for imported staff or change an existing password.
       </p>
 
       <StaffDialog open={dialogOpen} onOpenChange={setDialogOpen} staff={editing} canGrantAdmin={isSchoolAdmin} onSaved={load} />

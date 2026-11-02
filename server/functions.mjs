@@ -184,8 +184,11 @@ function manageStaff(actor, body) {
     const fullName = String(body.full_name || '').trim().replace(/\s+/g, ' ');
     const role = body.role || 'teacher';
     const username = String(body.username || email.split('@')[0] || '').trim();
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !fullName) {
-      throw Object.assign(new Error('Enter a full name and valid email address'), { status: 400 });
+    if (!fullName) {
+      throw Object.assign(new Error("Enter the staff member's full name"), { status: 400 });
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw Object.assign(new Error('Enter a valid email address or leave it blank'), { status: 400 });
     }
     if (!['teacher', 'it_admin', 'school_admin'].includes(role)) {
       throw Object.assign(new Error('Unknown staff role'), { status: 400 });
@@ -193,7 +196,7 @@ function manageStaff(actor, body) {
     if (role === 'school_admin' && !isSchoolAdmin(member)) {
       throw Object.assign(new Error('Only a school administrator can grant that role'), { status: 403 });
     }
-    if (records('SchoolMember').some((item) => item.school_id === schoolId && item.user_email?.toLowerCase() === email)) {
+    if (email && records('SchoolMember').some((item) => item.school_id === schoolId && item.user_email?.toLowerCase() === email)) {
       throw Object.assign(new Error('A staff account already exists for that email'), { status: 409 });
     }
     if (typeof body.password !== 'string' || body.password.length < 8) {

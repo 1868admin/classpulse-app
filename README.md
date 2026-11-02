@@ -42,9 +42,9 @@ administrator account. Before opening the setup form:
 4. After the account is created, remove `INITIAL_ADMIN_SETUP_TOKEN` from
    Vercel and redeploy. The first-admin endpoint remains closed because the
    account already exists.
-5. Sign in with the username/email and password created in ClassPulse. A
-   Supabase Auth user is separate and does not automatically become a
-   ClassPulse account.
+5. Sign in with the username and password created in ClassPulse. An email
+   address is optional. A Supabase Auth user is separate and does not
+   automatically become a ClassPulse account.
 6. Create the school in the setup screen; the new administrator is linked to
    it as `school_admin`. If existing school records have already been migrated,
    open **Schools** and choose the existing school to create the administrator
@@ -114,8 +114,10 @@ development command starts both the local API and frontend.
 On the first local visit, choose **Create the first administrator** from the
 login page to set a name, username, optional email, and password. Passwords
 must be at least 8 characters. After signing in, create a school or open an
-imported school. School administrators create staff usernames and passwords
-from the Staff page; no invitation email is sent.
+imported school. School administrators create staff accounts from the Staff
+page using a full name, username, and password; email is optional and no
+invitation email is sent. The initial password works immediately. Share it
+privately with the staff member, and avoid reusing one password across accounts.
 
 To run the built app instead:
 

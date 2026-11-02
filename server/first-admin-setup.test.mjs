@@ -128,6 +128,26 @@ test('one-time setup creates an admin who can create and link school workspaces'
     assert.equal(provisioned.data.member.role, 'school_admin');
     assert.equal(provisioned.data.member.school_id, provisioned.data.school.id);
 
+    const staffAccount = await request(baseUrl, '/api/functions/manageStaff', {
+      method: 'POST',
+      body: {
+        action: 'invite',
+        full_name: 'Local Teacher',
+        role: 'teacher',
+        username: 'local.teacher',
+        password: 'teacher-test-password',
+      },
+      cookie,
+    });
+    assert.equal(staffAccount.response.status, 200);
+    assert.equal(staffAccount.data.member.user_email, '');
+    assert.equal(staffAccount.data.member.username, 'local.teacher');
+    const staffLogin = await request(baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'local.teacher', password: 'teacher-test-password' },
+    });
+    assert.equal(staffLogin.response.status, 200);
+
     const existingSchool = await request(baseUrl, '/api/entities/School', {
       method: 'POST',
       body: { name: 'Existing School', code: 'EXISTING' },
