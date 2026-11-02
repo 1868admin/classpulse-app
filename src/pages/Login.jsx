@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
@@ -13,17 +13,8 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [needsSetup, setNeedsSetup] = useState(false);
-  // Post-login destination (e.g. the MCP OAuth consent page sends users here
-  // with returnTo so the grant flow can resume). Same-origin paths only.
+  
   const returnTo = safeReturnTo();
-
-  useEffect(() => {
-    fetch('/api/auth/setup-status')
-      .then((response) => response.json())
-      .then((data) => setNeedsSetup(data.needs_setup === true))
-      .catch((setupError) => setError(`Could not connect to the local server: ${setupError.message}`));
-  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -45,16 +36,7 @@ export default function Login() {
       title="Welcome back"
       subtitle="Log in to your account"
       footer={
-        <>
-          {needsSetup ? (
-            <>
-              First time here?{" "}
-              <Link to="/register" className="text-primary font-medium hover:underline">Create the local administrator</Link>
-            </>
-          ) : (
-            <>Local accounts are created by a school administrator.</>
-          )}
-        </>
+        <>Local accounts are managed by your Supabase administrator.</>
       }
     >
       {error && (
@@ -65,14 +47,14 @@ export default function Login() {
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="username">Username or email</Label>
+          <Label htmlFor="username">Email or username</Label>
           <div className="relative">
             <UserRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" aria-hidden="true" />
             <Input
               id="username"
               autoComplete="username"
               autoFocus
-              placeholder="Your username"
+              placeholder="Your email address"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               className="pl-10 h-12"
