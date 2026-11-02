@@ -75,6 +75,7 @@ if (!isPostgresMode) {
   if (!['require', 'verify-ca', 'verify-full'].includes(connectionUrl.searchParams.get('sslmode'))) {
     connectionUrl.searchParams.set('sslmode', 'require');
   }
+  connectionUrl.searchParams.set('uselibpqcompat', 'true');
   pool = new Pool({
     connectionString: connectionUrl.toString(),
     max: 5,

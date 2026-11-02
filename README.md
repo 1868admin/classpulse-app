@@ -16,8 +16,9 @@ access; the browser does not connect directly to Supabase or use Supabase Auth.
    `.env` files, SQLite databases, or exported school data.
 2. In Vercel, add `DATABASE_URL` as a server-only **Production** environment
    variable. Use the Supabase **transaction-mode connection pooler** URL
-   (port `6543`) with SSL. Do not prefix it with `VITE_`, expose it to client
-   code, or paste it into chat.
+   (port `6543`) with SSL. ClassPulse preserves PostgreSQL's standard SSL-mode
+   behavior for the Node.js driver. Do not prefix it with `VITE_`, expose it to
+   client code, or paste it into chat.
 3. Keep the Supabase project’s Data API disabled. The backend creates its
    PostgreSQL tables on first use and applies unique database constraints for
    student IDs, Birth Paper Numbers, class membership, and attendance sessions.
