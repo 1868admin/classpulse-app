@@ -206,13 +206,11 @@ function snapshotKey(...parts) {
 }
 
 async function loadPostgresSnapshot(client, db) {
-  const [records, accounts, sessions, loginAttempts, sequences] = await Promise.all([
-    client.query('SELECT entity, id, school_id, data FROM records'),
-    client.query('SELECT user_id, username, password_hash, active, created_at FROM accounts'),
-    client.query('SELECT token_hash, user_id, expires_at FROM sessions'),
-    client.query('SELECT attempt_key, failures, window_started_at, blocked_until FROM login_attempts'),
-    client.query('SELECT school_id, cohort_key, next_value FROM student_id_sequences'),
-  ]);
+  const records = await client.query('SELECT entity, id, school_id, data FROM records');
+  const accounts = await client.query('SELECT user_id, username, password_hash, active, created_at FROM accounts');
+  const sessions = await client.query('SELECT token_hash, user_id, expires_at FROM sessions');
+  const loginAttempts = await client.query('SELECT attempt_key, failures, window_started_at, blocked_until FROM login_attempts');
+  const sequences = await client.query('SELECT school_id, cohort_key, next_value FROM student_id_sequences');
   const original = {
     records: new Map(),
     accounts: new Map(),
@@ -237,7 +235,7 @@ async function loadPostgresSnapshot(client, db) {
   const insertSession = db.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)');
   for (const row of sessions.rows) {
     const expiresAt = Number(row.expires_at);
-    original.sessions.set(row.token_hash, [row.user_id, expiresAt]);
+    original.sessions.set(snapshotKey(row.token_hash), [row.user_id, expiresAt]);
     insertSession.run(row.token_hash, row.user_id, expiresAt);
   }
   const insertLoginAttempt = db.prepare(
@@ -245,7 +243,7 @@ async function loadPostgresSnapshot(client, db) {
   );
   for (const row of loginAttempts.rows) {
     const values = [Number(row.failures), Number(row.window_started_at), Number(row.blocked_until)];
-    original.loginAttempts.set(row.attempt_key, values);
+    original.loginAttempts.set(snapshotKey(row.attempt_key), values);
     insertLoginAttempt.run(row.attempt_key, ...values);
   }
   const insertSequence = db.prepare(
