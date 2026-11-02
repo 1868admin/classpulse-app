@@ -49,6 +49,7 @@ export const base44 = {
     loginViaEmailPassword: (username, password) =>
       request('/auth/login', { method: 'POST', body: { username, password } }),
     createFirstAdmin: (details) => request('/auth/setup', { method: 'POST', body: details }),
+    recoverInitialAdmin: (details) => request('/auth/recover-admin', { method: 'POST', body: details }),
     me: () => request('/auth/me'),
     setupStatus: () => request('/auth/setup-status'),
     isAuthenticated: async () => {

@@ -209,6 +209,50 @@ export function createFirstAdmin({ username, password, fullName, email, setupTok
   return { user, session: createSession(user.id) };
 }
 
+export function recoverInitialAdmin({ username, password, recoveryToken }) {
+  const expectedToken = process.env.ADMIN_RECOVERY_TOKEN || '';
+  if (expectedToken.length < 32 || expectedToken.length > 256) {
+    throw Object.assign(new Error('Administrator recovery is not enabled'), { status: 404 });
+  }
+  if (typeof recoveryToken !== 'string' || recoveryToken.length < 32 || recoveryToken.length > 256) {
+    throw Object.assign(new Error('The one-time recovery key is invalid'), { status: 403 });
+  }
+  const expectedHash = createHash('sha256').update(expectedToken).digest();
+  const submittedHash = createHash('sha256').update(recoveryToken).digest();
+  if (!timingSafeEqual(expectedHash, submittedHash)) {
+    throw Object.assign(new Error('The one-time recovery key is invalid'), { status: 403 });
+  }
+  validateCredentials(username, password);
+
+  const recoveryHash = submittedHash.toString('hex');
+  return withTransaction(() => {
+    if (database.prepare('SELECT 1 FROM records WHERE entity = ? AND id = ?').get('AdminRecovery', recoveryHash)) {
+      throw Object.assign(new Error('This one-time recovery key has already been used'), { status: 409 });
+    }
+
+    const adminUsers = database.prepare('SELECT id, data FROM records WHERE entity = ?').all('User')
+      .map((row) => JSON.parse(row.data))
+      .filter((user) => user.role === 'admin')
+      .map((user) => ({
+        user,
+        account: database.prepare('SELECT user_id FROM accounts WHERE user_id = ?').get(user.id),
+      }))
+      .filter(({ account }) => account);
+    if (adminUsers.length !== 1) {
+      throw Object.assign(new Error('Recovery requires exactly one existing administrator account'), { status: 409 });
+    }
+
+    const { user } = adminUsers[0];
+    updateAccountCredentials({ userId: user.id, username, password });
+    database.prepare('INSERT INTO records (entity, id, school_id, data) VALUES (?, ?, ?, ?)')
+      .run('AdminRecovery', recoveryHash, '', JSON.stringify({
+        id: recoveryHash,
+        used_at: new Date().toISOString(),
+      }));
+    return { username: String(username).trim() };
+  });
+}
+
 export function updateAccountCredentials({ userId, username, password }) {
   const account = database.prepare('SELECT * FROM accounts WHERE user_id = ?').get(userId);
   if (!account) throw Object.assign(new Error('This staff member does not have a local login yet'), { status: 404 });

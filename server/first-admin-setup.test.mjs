@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const serverPath = path.join(root, 'server', 'index.mjs');
 const setupToken = 'test-only-first-admin-key-0123456789abcdef';
+const recoveryToken = 'test-only-admin-recovery-key-0123456789abcdef';
 
 async function unusedPort() {
   const server = createServer();
@@ -57,6 +58,7 @@ test('one-time setup creates an admin who can create and link school workspaces'
     CLASSPULSE_HOST: '127.0.0.1',
     CLASSPULSE_PORT: String(port),
     INITIAL_ADMIN_SETUP_TOKEN: setupToken,
+    ADMIN_RECOVERY_TOKEN: recoveryToken,
   };
   delete environment.DATABASE_URL;
   delete environment.VERCEL;
@@ -180,6 +182,39 @@ test('one-time setup creates an admin who can create and link school workspaces'
       },
     });
     assert.equal(secondSetup.response.status, 409);
+
+    const recovered = await request(baseUrl, '/api/auth/recover-admin', {
+      method: 'POST',
+      body: {
+        recoveryToken,
+        username: 'admin.recovered',
+        password: 'recovered-admin-password',
+      },
+    });
+    assert.equal(recovered.response.status, 200);
+    assert.equal(recovered.data.username, 'admin.recovered');
+
+    const recoveredLogin = await request(baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin.recovered', password: 'recovered-admin-password' },
+    });
+    assert.equal(recoveredLogin.response.status, 200);
+
+    const oldLogin = await request(baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: { username: 'admin.one', password: 'valid-test-password' },
+    });
+    assert.equal(oldLogin.response.status, 401);
+
+    const reusedRecovery = await request(baseUrl, '/api/auth/recover-admin', {
+      method: 'POST',
+      body: {
+        recoveryToken,
+        username: 'admin.again',
+        password: 'another-recovered-password',
+      },
+    });
+    assert.equal(reusedRecovery.response.status, 409);
   } finally {
     if (child.exitCode === null) {
       child.kill('SIGTERM');

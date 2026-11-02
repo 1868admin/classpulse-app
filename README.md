@@ -52,6 +52,16 @@ administrator account. Before opening the setup form:
    membership instead. Add teachers and other school staff from **Staff &
    accounts**.
 
+### Recovering hosted administrator access
+
+If the hosted administrator password is lost, set a temporary random
+`ADMIN_RECOVERY_TOKEN` in Vercel Production (at least 32 characters), redeploy,
+then open `/recover-admin` and enter the key with the new administrator
+username and password. Recovery only updates the existing administrator
+account, revokes its active sessions, and permanently consumes that key.
+Remove `ADMIN_RECOVERY_TOKEN` from Vercel and redeploy immediately after
+recovery. This does not reset or delete school data.
+
 If `DATABASE_URL` is missing, the API cannot start. If the first-admin key is
 missing on Vercel, the setup page stays unavailable rather than opening
 registration to the public. Do not enable direct browser access to student

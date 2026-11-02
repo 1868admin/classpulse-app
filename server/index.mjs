@@ -9,6 +9,7 @@ import {
   isInitialAdminSetupAvailable,
   isFirstRun,
   revokeSession,
+  recoverInitialAdmin,
   signIn,
 } from './auth.mjs';
 import {
@@ -167,6 +168,12 @@ async function handleAuth(request, response, parts) {
     const body = await readJson(request);
     const result = createFirstAdmin(body);
     respond(response, 201, { user: result.user }, { 'Set-Cookie': cookieHeader(result.session.token, request) });
+    return true;
+  }
+  if (parts[2] === 'recover-admin' && method === 'POST') {
+    const body = await readJson(request);
+    const result = recoverInitialAdmin(body);
+    respond(response, 200, result);
     return true;
   }
   if (parts[2] === 'login' && method === 'POST') {
