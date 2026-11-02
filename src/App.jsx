@@ -40,7 +40,7 @@ const AuthenticatedApp = () => {
       </div>
     );
   }
-
+// Triggering Vercel deploy
   if (!isAuthPath && authError) {
     if (authError.type === 'auth_required') {
       navigateToLogin();
