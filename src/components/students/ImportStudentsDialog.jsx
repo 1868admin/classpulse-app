@@ -292,6 +292,39 @@ export default function ImportStudentsDialog({
               </div>
             </div>
 
+            <div className="rounded-xl border border-border">
+              <p className="border-b border-border px-3 py-2 text-[13px] font-semibold">
+                Preview{mapped.length > 10 ? ` (first 10 of ${mapped.length} rows)` : ` (${mapped.length} rows)`}
+              </p>
+              <div className="max-h-64 overflow-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="sticky top-0 bg-muted">
+                    <tr>
+                      <th className="px-2 py-1.5 font-medium">#</th>
+                      {visibleFields.filter((f) => mapping[f.key]).map((f) => (
+                        <th key={f.key} className="whitespace-nowrap px-2 py-1.5 font-medium">{f.label}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mapped.slice(0, 10).map((row, i) => (
+                      <tr key={i} className="border-t border-border">
+                        <td className="px-2 py-1.5 text-muted-foreground">{i + 2}</td>
+                        {visibleFields.filter((f) => mapping[f.key]).map((f) => (
+                          <td key={f.key} className="whitespace-nowrap px-2 py-1.5">{row[f.key]}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {allProblems.length > 0 && (
+                <ul className="max-h-24 list-inside list-disc space-y-0.5 overflow-y-auto border-t border-border px-3 py-2 text-xs text-amber-600">
+                  {allProblems.slice(0, 20).map((p, i) => <li key={i}>{p}</li>)}
+                </ul>
+              )}
+            </div>
+
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className={`flex items-center gap-1.5 text-xs ${allProblems.length ? 'text-amber-600' : 'text-emerald-600'}`}>
                 {allProblems.length ? <AlertTriangle className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
