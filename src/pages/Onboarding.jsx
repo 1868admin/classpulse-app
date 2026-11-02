@@ -22,6 +22,7 @@ export default function Onboarding() {
   const [existingSchools, setExistingSchools] = useState(false);
   const [checkingSchools, setCheckingSchools] = useState(isPlatformAdmin);
   const [schoolsCheckFailed, setSchoolsCheckFailed] = useState(false);
+  const [checkingAccess, setCheckingAccess] = useState(false);
 
   useEffect(() => {
     if (!isPlatformAdmin) return;
@@ -57,6 +58,15 @@ export default function Onboarding() {
   };
 
   if (!isPlatformAdmin) {
+    const checkAccess = async () => {
+      setCheckingAccess(true);
+      try {
+        await refresh();
+      } finally {
+        setCheckingAccess(false);
+      }
+    };
+
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-4">
         <div className="cp-card max-w-md p-7 text-center">
@@ -65,10 +75,15 @@ export default function Onboarding() {
           </span>
           <h1 className="text-lg font-bold">Your account isn't attached to a school yet</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Ask your school administrator to add you with <span className="font-medium text-foreground">{user?.email}</span>.
+            Ask your school administrator to add <span className="font-medium text-foreground">{user?.email || user?.username}</span>.
             Once they do, your school, classes and registers will appear here.
           </p>
-          <Button className="mt-5 w-full" variant="outline" onClick={() => base44.auth.logout(window.location.href)}>Sign out</Button>
+          <div className="mt-5 grid gap-2">
+            <Button className="w-full" variant="outline" onClick={checkAccess} disabled={checkingAccess}>
+              {checkingAccess ? 'Checking access…' : 'Check again'}
+            </Button>
+            <Button className="w-full" variant="ghost" onClick={() => base44.auth.logout(window.location.href)}>Sign out</Button>
+          </div>
         </div>
       </div>
     );
@@ -81,9 +96,9 @@ export default function Onboarding() {
           <span className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-primary/10 text-primary">
             <School className="h-5 w-5" />
           </span>
-          <h1 className="text-lg font-bold">Local school data is available</h1>
+          <h1 className="text-lg font-bold">Existing school data is available</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Open the school list to connect this administrator account to an imported school. This avoids creating duplicate school records.
+            Open the school list to securely link this administrator account to an existing school. This avoids creating duplicate school records.
           </p>
           {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
           <Button className="mt-5 w-full" onClick={() => navigate('/platform')}>Open schools</Button>
@@ -103,9 +118,9 @@ export default function Onboarding() {
           <span className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
             <School className="h-5 w-5" />
           </span>
-          <h1 className="text-xl font-extrabold">Register your first school</h1>
+          <h1 className="text-xl font-extrabold">Create your school</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            This creates the school, its academic year, year groups and your administrator account. You can add more schools later from the Schools page.
+            This creates the school, its academic year and year groups, and links your account as its school administrator. You can add more schools later from the Schools page.
           </p>
           <form onSubmit={submit} className="mt-6 grid gap-4 sm:grid-cols-2">
             <Field label="School name" required value={form.name} onChange={set('name')} placeholder="e.g. Belmont Secondary School" className="sm:col-span-2" />

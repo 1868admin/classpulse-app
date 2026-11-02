@@ -1,5 +1,5 @@
 import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
+import { base44 } from '@/api/base44Client';
 
 const AuthContext = createContext(null);
 
@@ -14,14 +14,17 @@ export const AuthProvider = ({ children }) => {
     setIsLoadingAuth(true);
     setAuthError(null);
     try {
-      const { data: { user }, error } = await supabase.auth.getUser();
-      if (error) throw error;
-      setUser(user);
-      setIsAuthenticated(!!user);
+      const currentUser = await base44.auth.me();
+      setUser(currentUser);
+      setIsAuthenticated(true);
     } catch (error) {
       setUser(null);
       setIsAuthenticated(false);
-      setAuthError({ type: 'auth_required', message: 'Authentication required' });
+      if (error.status !== 401) {
+        setAuthError({ type: 'local_server_error', message: error.message });
+      } else {
+        setAuthError({ type: 'auth_required', message: 'Authentication required' });
+      }
     } finally {
       setIsLoadingAuth(false);
       setAuthChecked(true);
@@ -34,16 +37,14 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
     setIsAuthenticated(false);
     try {
-      await supabase.auth.signOut();
+      await base44.auth.logout();
       if (shouldRedirect) window.location.assign('/login');
     } catch (error) {
-      setAuthError({ type: 'supabase_error', message: error.message });
+      setAuthError({ type: 'local_server_error', message: error.message });
     }
   };
 
-  const navigateToLogin = () => {
-    window.location.assign(`/login?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`);
-  };
+  const navigateToLogin = () => base44.auth.redirectToLogin(window.location.href);
 
   return (
     <AuthContext.Provider value={{
@@ -52,7 +53,7 @@ export const AuthProvider = ({ children }) => {
       isLoadingAuth,
       isLoadingPublicSettings: false,
       authError,
-      appPublicSettings: { id: 'supabase', public_settings: {} },
+      appPublicSettings: { id: 'local', public_settings: {} },
       authChecked,
       logout,
       navigateToLogin,

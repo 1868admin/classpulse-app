@@ -9,21 +9,52 @@ school data once.
 
 The project also supports a shared Vercel deployment backed by Supabase
 PostgreSQL. Local use remains SQLite unless `DATABASE_URL` is set. In the
-hosted deployment, API requests use a server-side PostgreSQL connection; no
-Supabase browser key or Data API access is used.
+hosted deployment, the server handles authentication and all school-data
+access; the browser does not connect directly to Supabase or use Supabase Auth.
 
 1. Connect the project to a **private** Git repository in Vercel. Do not commit
    `.env` files, SQLite databases, or exported school data.
-2. In Vercel, add `DATABASE_URL` as a server-only environment variable for the
-   deployment. Use the Supabase **transaction-mode connection pooler** URL
-   (port `6543`) and enable SSL. Do not prefix it with `VITE_`, expose it to
-   client code, or paste it into chat.
+2. In Vercel, add `DATABASE_URL` as a server-only **Production** environment
+   variable. Use the Supabase **transaction-mode connection pooler** URL
+   (port `6543`) with SSL. Do not prefix it with `VITE_`, expose it to client
+   code, or paste it into chat.
 3. Keep the Supabase project’s Data API disabled. The backend creates its
    PostgreSQL tables on first use and applies unique database constraints for
    student IDs, Birth Paper Numbers, class membership, and attendance sessions.
 4. Vercel builds the frontend and serves the same-origin API from the
    `api/` function. `vercel.json` includes the entity definitions required by
    the server. The Vercel runtime requires Node.js 22.12 or newer.
+
+### Secure first administrator and school setup
+
+The public deployment must not allow an untrusted visitor to claim its first
+administrator account. Before opening the setup form:
+
+1. Generate a random one-time key locally, for example with
+   `openssl rand -hex 32`.
+2. Add it to Vercel as the server-only Production environment variable
+   `INITIAL_ADMIN_SETUP_TOKEN`. Never use a `VITE_` prefix or paste the key
+   into chat or source control.
+3. Redeploy, open `/register` on the deployed site, and create the first
+   ClassPulse administrator using that key. The server verifies the key and
+   only allows the first account to be created once. Passwords are stored as
+   salted hashes, and the session cookie is HTTP-only and secure.
+4. After the account is created, remove `INITIAL_ADMIN_SETUP_TOKEN` from
+   Vercel and redeploy. The first-admin endpoint remains closed because the
+   account already exists.
+5. Sign in with the username/email and password created in ClassPulse. A
+   Supabase Auth user is separate and does not automatically become a
+   ClassPulse account.
+6. Create the school in the setup screen; the new administrator is linked to
+   it as `school_admin`. If existing school records have already been migrated,
+   open **Schools** and choose the existing school to create the administrator
+   membership instead. Add teachers and other school staff from **Staff &
+   accounts**.
+
+If `DATABASE_URL` is missing, the API cannot start. If the first-admin key is
+missing on Vercel, the setup page stays unavailable rather than opening
+registration to the public. Do not enable direct browser access to student
+tables to work around deployment configuration.
 
 For local development against the shared database, create a private
 `.env.local` file containing `DATABASE_URL`, then run:
@@ -80,11 +111,11 @@ Open the local URL printed by Vite (normally
 `http://127.0.0.1:5173`). Keep the terminal open while using ClassPulse. The
 development command starts both the local API and frontend.
 
-On the first visit, choose **Create the local administrator** to set a name,
-username, optional email, and password. Passwords must be at least 8
-characters. After signing in, create a school or open an imported school.
-School administrators create staff usernames and passwords from the Staff
-page; no invitation email is sent.
+On the first local visit, choose **Create the first administrator** from the
+login page to set a name, username, optional email, and password. Passwords
+must be at least 8 characters. After signing in, create a school or open an
+imported school. School administrators create staff usernames and passwords
+from the Staff page; no invitation email is sent.
 
 To run the built app instead:
 

@@ -68,8 +68,15 @@ if (!isPostgresMode) {
   chmodSync(databasePath, 0o600);
   initializeSqliteDatabase(localDatabase, true);
 } else {
+  const connectionUrl = new URL(process.env.DATABASE_URL);
+  if (!['postgres:', 'postgresql:'].includes(connectionUrl.protocol)) {
+    throw new Error('DATABASE_URL must be a PostgreSQL connection URL');
+  }
+  if (!['require', 'verify-ca', 'verify-full'].includes(connectionUrl.searchParams.get('sslmode'))) {
+    connectionUrl.searchParams.set('sslmode', 'require');
+  }
   pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: connectionUrl.toString(),
     max: 5,
     connectionTimeoutMillis: 10000,
     idleTimeoutMillis: 10000,

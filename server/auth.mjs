@@ -152,9 +152,26 @@ export function getActor(request) {
   return { user: { ...user, username: account.username, school_id: schoolId }, member, schoolId, token };
 }
 
-export function createFirstAdmin({ username, password, fullName, email }) {
+export function createFirstAdmin({ username, password, fullName, email, setupToken }) {
   if (database.prepare('SELECT COUNT(*) AS count FROM accounts').get().count > 0) {
     throw Object.assign(new Error('Initial setup is already complete'), { status: 409 });
+  }
+  const expectedToken = process.env.INITIAL_ADMIN_SETUP_TOKEN || '';
+  if (process.env.VERCEL === '1' || expectedToken) {
+    if (expectedToken.length < 32 || expectedToken.length > 256) {
+      throw Object.assign(new Error('Initial administrator setup is not configured'), {
+        status: 503,
+        expose: true,
+      });
+    }
+    if (typeof setupToken !== 'string' || setupToken.length < 32 || setupToken.length > 256) {
+      throw Object.assign(new Error('The one-time setup key is invalid'), { status: 403 });
+    }
+    const expectedHash = createHash('sha256').update(expectedToken).digest();
+    const submittedHash = createHash('sha256').update(setupToken).digest();
+    if (!timingSafeEqual(expectedHash, submittedHash)) {
+      throw Object.assign(new Error('The one-time setup key is invalid'), { status: 403 });
+    }
   }
   validateCredentials(username, password);
   const name = String(fullName || '').trim().replace(/\s+/g, ' ');
@@ -224,6 +241,14 @@ export function setAccountActive(userId, active) {
 
 export function isFirstRun() {
   return database.prepare('SELECT COUNT(*) AS count FROM accounts').get().count === 0;
+}
+
+export function isInitialAdminSetupAvailable() {
+  const expectedToken = process.env.INITIAL_ADMIN_SETUP_TOKEN || '';
+  const setupKeyConfigured = process.env.VERCEL !== '1' && !expectedToken
+    ? true
+    : expectedToken.length >= 32 && expectedToken.length <= 256;
+  return isFirstRun() && setupKeyConfigured;
 }
 
 export function getAccountForUser(userId) {

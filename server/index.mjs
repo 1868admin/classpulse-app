@@ -6,6 +6,7 @@ import {
   createFirstAdmin,
   getActor,
   getTokenFromRequest,
+  isInitialAdminSetupAvailable,
   isFirstRun,
   revokeSession,
   signIn,
@@ -155,7 +156,11 @@ function applyQuery(entity, actor, query) {
 async function handleAuth(request, response, parts) {
   const method = request.method;
   if (parts[2] === 'setup-status' && method === 'GET') {
-    respond(response, 200, { needs_setup: isFirstRun() });
+    respond(response, 200, {
+      needs_setup: isFirstRun(),
+      setup_available: isInitialAdminSetupAvailable(),
+      requires_setup_token: process.env.VERCEL === '1' || Boolean(process.env.INITIAL_ADMIN_SETUP_TOKEN),
+    });
     return true;
   }
   if (parts[2] === 'setup' && method === 'POST') {

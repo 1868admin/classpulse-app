@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
@@ -13,8 +13,16 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [setupAvailable, setSetupAvailable] = useState(false);
+  const [setupCheckError, setSetupCheckError] = useState("");
   
   const returnTo = safeReturnTo();
+
+  useEffect(() => {
+    base44.auth.setupStatus()
+      .then((status) => setSetupAvailable(status.setup_available === true))
+      .catch((setupError) => setSetupCheckError(setupError.message));
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -36,7 +44,22 @@ export default function Login() {
       title="Welcome back"
       subtitle="Log in to your account"
       footer={
-        <>Local accounts are managed by your Supabase administrator.</>
+        <div className="space-y-2">
+          <p>ClassPulse accounts are managed by your school administrator.</p>
+          {setupAvailable && (
+            <p>
+              First time setting up this deployment?{' '}
+              <Link to="/register" className="font-medium text-primary hover:underline">
+                Create the first administrator
+              </Link>
+            </p>
+          )}
+          {setupCheckError && (
+            <p className="text-xs text-destructive">
+              Could not check administrator setup: {setupCheckError}
+            </p>
+          )}
+        </div>
       }
     >
       {error && (
