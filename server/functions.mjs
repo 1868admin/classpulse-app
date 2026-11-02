@@ -773,30 +773,27 @@ function allocateStudentId(schoolId, yearGroupId, homeroomId) {
     classCode = classCode.replace(/^(?:form\s*)?\d+\s*/i, '');
   }
   classCode = classCode.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '') || 'UNASSIGNED';
-  const cohortKey = `${graduatingYear}:${classCode}`;
   const prefix = `${graduatingYear}-${classCode}-`;
-  const existing = records('Student', (student) => student.school_id === schoolId)
+
+  const existingSeqs = records('Student', (student) => student.school_id === schoolId)
     .map((student) => String(student.student_id_no || ''))
-    .filter((studentId) => studentId.startsWith(prefix))
-    .map((studentId) => Number(studentId.slice(prefix.length)))
-    .filter((sequence) => Number.isSafeInteger(sequence) && sequence > 0);
+    .filter((studentId) => studentId.toUpperCase().startsWith(prefix.toUpperCase()))
+    .map((studentId) => {
+      const parts = studentId.split('-');
+      const num = Number(parts.at(-1));
+      return Number.isSafeInteger(num) && num > 0 ? num : 0;
+    })
+    .filter((seq) => seq > 0);
 
-  const sequenceRecord = find('StudentIdSequence', (item) => item.school_id === schoolId && item.cohort_key === cohortKey);
-  const savedSequence = sequenceRecord?.next_value || 1;
-
-  let sequence = Math.max(savedSequence, (existing.length ? Math.max(...existing) : 0) + 1);
+  let sequence = (existingSeqs.length ? Math.max(...existingSeqs) : 0) + 1;
   let studentId = `${prefix}${String(sequence).padStart(4, '0')}`;
+
   const usedIds = new Set(records('Student', (student) => student.school_id === schoolId)
     .map((student) => String(student.student_id_no || '').toLowerCase()));
+
   while (usedIds.has(studentId.toLowerCase())) {
     sequence += 1;
     studentId = `${prefix}${String(sequence).padStart(4, '0')}`;
-  }
-
-  if (sequenceRecord) {
-    updateRecord('StudentIdSequence', sequenceRecord.id, { next_value: sequence + 1 });
-  } else {
-    createRecord('StudentIdSequence', { school_id: schoolId, cohort_key: cohortKey, next_value: sequence + 1 });
   }
 
   return { studentId, graduatingYear };
