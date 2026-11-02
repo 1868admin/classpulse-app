@@ -59,13 +59,12 @@ function respond(response, status, value, headers = {}) {
 }
 
 function cookieHeader(token, request) {
-  const forwardedProtocol = String(request.headers['x-forwarded-proto'] || '').split(',')[0].trim();
-  const secure = request.socket.encrypted || process.env.VERCEL === '1' || forwardedProtocol === 'https'
+  const forwardedProtocol = String(request.headers?.['x-forwarded-proto'] || '').split(',')[0].trim();
+  const secure = request?.socket?.encrypted || process.env.VERCEL === '1' || forwardedProtocol === 'https'
     ? '; Secure'
     : '';
   return `classpulse_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL_SECONDS}${secure}`;
 }
-
 function clearCookieHeader() {
   return 'classpulse_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0';
 }
