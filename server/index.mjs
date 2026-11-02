@@ -58,10 +58,12 @@ function respond(response, status, value, headers = {}) {
   response.end(value === null ? '' : JSON.stringify(value));
 }
 
-function cookieHeader(token, request = {}) {
-  const headers = request?.headers || {};
+function cookieHeader(token, request) {
+  const req = request || {};
+  const headers = req.headers || {};
   const forwardedProtocol = String(headers['x-forwarded-proto'] || '').split(',')[0].trim();
-  const isEncrypted = request?.socket?.encrypted || false;
+  const socket = req.socket;
+  const isEncrypted = socket ? Boolean(socket.encrypted) : false;
   const secure = isEncrypted || process.env.VERCEL === '1' || forwardedProtocol === 'https'
     ? '; Secure'
     : '';
