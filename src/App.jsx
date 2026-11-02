@@ -46,7 +46,7 @@ const AuthenticatedApp = () => {
       navigateToLogin();
       return null;
     } else {
-      return (
+      return ( 
         <div className="flex min-h-screen flex-col items-center justify-center gap-3 px-6 text-center">
           <h1 className="text-lg font-bold">Local ClassPulse server unavailable</h1>
           <p className="max-w-md text-sm text-muted-foreground">
