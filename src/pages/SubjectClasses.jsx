@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, BookOpen, Users, Archive } from 'lucide-react';
+import { Plus, BookOpen, Users, Archive, Upload } from 'lucide-react';
 import { base44 } from '@/api/base44Client';
 import { useSchool } from '@/context/SchoolContext';
 import AppShell from '@/components/shell/AppShell';
@@ -9,6 +9,7 @@ import EmptyState from '@/components/ui-bits/EmptyState';
 import SearchInput from '@/components/ui-bits/SearchInput';
 import ClassOrderControls from '@/components/ui-bits/ClassOrderControls';
 import ClassFormDialog from '@/components/classes/ClassFormDialog';
+import SubjectClassImportDialog from '@/components/classes/SubjectClassImportDialog';
 import ConfirmDialog from '@/components/ui-bits/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { notifySuccess, notifyError } from '@/lib/notify';
@@ -25,6 +26,7 @@ export default function SubjectClasses() {
   const [loadError, setLoadError] = useState('');
   const [term, setTerm] = useState('');
   const [open, setOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [archiving, setArchiving] = useState(null);
 
@@ -77,7 +79,10 @@ export default function SubjectClasses() {
       <PageHeader
         title="Subject classes"
         subtitle={isStaff ? 'Every subject class in the school' : 'Classes you teach — create one any time, no timetable needed'}
-        actions={<Button size="sm" onClick={() => { setEditing(null); setOpen(true); }}><Plus className="mr-1.5 h-3.5 w-3.5" />Create class</Button>}
+        actions={<>
+          <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}><Upload className="mr-1.5 h-3.5 w-3.5" />Bulk import</Button>
+          <Button size="sm" onClick={() => { setEditing(null); setOpen(true); }}><Plus className="mr-1.5 h-3.5 w-3.5" />Create class</Button>
+        </>}
       />
 
       <div className="mb-3 max-w-sm"><SearchInput value={term} onChange={setTerm} placeholder="Search class or subject…" /></div>
@@ -148,6 +153,7 @@ export default function SubjectClasses() {
         </div>
       )}
 
+      <SubjectClassImportDialog open={importOpen} onOpenChange={setImportOpen} onImported={load} />
       <ClassFormDialog
         open={open}
         onOpenChange={setOpen}

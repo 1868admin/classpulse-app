@@ -1,155 +1,106 @@
 import { useState } from 'react';
-import * as XLSX from 'xlsx';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { notifyError, notifySuccess } from '@/lib/notify';
 import { base44 } from '@/api/base44Client';
+import ImportWizard from '@/components/imports/ImportWizard';
+import { Checkbox } from '@/components/ui/checkbox';
+import { downloadTeacherTemplate } from '@/lib/importTemplates';
+import { gridToObjects, readWorkbook } from '@/lib/spreadsheet';
 
-const HEADER_ALIASES = {
+const ALIASES = {
   full_name: ['fullname', 'name', 'teachername', 'staffname'],
   teacher_number: ['teachernumber', 'teacherno', 'staffnumber'],
   employment_status: ['employmentstatus', 'status'],
   employment_start_date: ['employmentstartdate', 'startdate'],
   effective_date: ['effectivedate', 'departuredate', 'leavedate', 'returndate'],
-  employment_reason: ['employmentreason', 'reason', 'notes'],
-  subject_specialisms: ['subjectspecialisms', 'specialisations', 'specializations', 'qualifiedsubjects'],
+  employment_reason: ['employmentreason', 'reason', 'notes', 'employmentnotes'],
+  subject_specialisms: ['subjectspecialisms', 'subjectspecialisations', 'specialisations', 'specializations', 'qualifiedsubjects'],
   homeroom_classes: ['homeroomclasses', 'homeroom', 'homeroomassignments'],
   subject_classes: ['subjectclasses', 'teachingassignments', 'assignedclasses'],
   year_dean: ['yeardean', 'yeargroupdean'],
 };
+const DATE_FIELDS = ['employment_start_date', 'effective_date'];
 
-function normalizeRows(rawRows) {
-  return rawRows.map((raw) => {
-    const values = {};
-    for (const [header, value] of Object.entries(raw)) {
-      const normalized = header.toLocaleLowerCase().replace(/[^a-z0-9]/g, '');
-      const field = Object.entries(HEADER_ALIASES).find(([, aliases]) => aliases.includes(normalized))?.[0];
-      if (!field) continue;
-      if (field.includes('date') && value instanceof Date) values[field] = value.toISOString().slice(0, 10);
-      else if (field.includes('date') && typeof value === 'number') {
-        const parsed = XLSX.SSF.parse_date_code(value);
-        values[field] = parsed ? `${String(parsed.y).padStart(4, '0')}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}` : '';
-      } else values[field] = value;
-    }
-    return values;
-  }).filter((row) => Object.values(row).some((value) => String(value || '').trim()));
-}
+const call = async (body) => {
+  try {
+    const response = await base44.functions.invoke('manageStaff', body);
+    if (response.data?.error) throw new Error(response.data.error);
+    return response.data;
+  } catch (error) {
+    throw new Error(error.response?.data?.error || error.message);
+  }
+};
 
 export default function StaffImportDialog({ open, onOpenChange, onImported }) {
-  const [fileName, setFileName] = useState('');
-  const [rows, setRows] = useState([]);
-  const [preview, setPreview] = useState(null);
-  const [busy, setBusy] = useState(false);
+  const [includeExisting, setIncludeExisting] = useState(false);
 
-  const readFile = async (file) => {
-    setBusy(true);
-    setFileName(file.name);
-    setPreview(null);
-    try {
-      const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      if (!sheet) throw new Error('The workbook does not contain a worksheet.');
-      const parsed = normalizeRows(XLSX.utils.sheet_to_json(sheet, { defval: '' }));
-      if (!parsed.length) throw new Error('The first worksheet does not contain teacher rows.');
-      if (parsed.length > 500) throw new Error('Import at most 500 teachers at a time.');
-      setRows(parsed);
-    } catch (error) {
-      setRows([]);
-      notifyError('Could not read staffing file', error.message);
-    } finally {
-      setBusy(false);
-    }
+  const onDownload = async (format) => {
+    const data = await call({ action: 'import_template_data' });
+    await downloadTeacherTemplate(data, { format, includeExisting });
   };
 
-  const review = async () => {
-    setBusy(true);
-    try {
-      const response = await base44.functions.invoke('manageStaff', { action: 'import_preview', rows });
-      if (response.data?.error) throw new Error(response.data.error);
-      setPreview(response.data);
-    } catch (error) {
-      notifyError('Could not validate staffing file', error.response?.data?.error || error.message);
-    } finally {
-      setBusy(false);
-    }
+  const parseFile = async (file) => {
+    const sheets = await readWorkbook(file);
+    const sheet = sheets.find((item) => !['instructions', 'lists'].includes(item.name.toLowerCase())) || sheets[0];
+    const rows = gridToObjects(sheet.rows, ALIASES, DATE_FIELDS);
+    if (!rows.length) throw new Error('The worksheet does not contain teacher rows.');
+    if (rows.length > 500) throw new Error('Import at most 500 teachers at a time.');
+    return { rows };
   };
 
-  const apply = async () => {
-    setBusy(true);
-    try {
-      const response = await base44.functions.invoke('manageStaff', { action: 'import_apply', rows });
-      if (response.data?.error) throw new Error(response.data.error);
-      notifySuccess('Staffing import complete', `${response.data.created} created · ${response.data.updated} updated · ${response.data.assignments_added} assignments added.`);
-      onImported();
-      onOpenChange(false);
-      setRows([]);
-      setPreview(null);
-    } catch (error) {
-      notifyError('Could not apply staffing import', error.response?.data?.error || error.message);
-    } finally {
-      setBusy(false);
-    }
+  const runPreview = async (payload) => {
+    const result = await call({ action: 'import_preview', rows: payload.rows });
+    const { summary } = result;
+    return {
+      importable: summary.create + summary.update,
+      stats: [
+        { label: 'Rows detected', value: summary.total },
+        { label: 'New teachers', value: summary.create, tone: 'good' },
+        { label: 'Existing teachers updated', value: summary.update, tone: summary.update ? 'warn' : 'neutral' },
+        { label: 'Invalid rows', value: summary.invalid, tone: summary.invalid ? 'bad' : 'neutral' },
+      ],
+      issues: result.rows.flatMap((row) => row.errors.map((message) => ({ row: row.row, reference: row.teacher_number || row.full_name, message }))),
+      columns: [
+        { key: 'row', label: 'Row' }, { key: 'name', label: 'Teacher' }, { key: 'number', label: 'Teacher Number' },
+        { key: 'action', label: 'Action' }, { key: 'status', label: 'Employment' }, { key: 'notes', label: 'Validation' },
+      ],
+      rows: result.rows.map((row) => ({
+        row: row.row, name: row.full_name || '—', number: row.teacher_number || '—', action: row.operation,
+        status: (row.employment_status || '').replace('_', ' '), notes: row.errors.join('; ') || 'Ready',
+      })),
+    };
   };
 
-  const close = (nextOpen) => {
-    if (!nextOpen && !busy) {
-      setRows([]);
-      setPreview(null);
-      setFileName('');
-    }
-    onOpenChange(nextOpen);
+  const runCommit = async (payload) => {
+    const result = await call({ action: 'import_apply', rows: payload.rows });
+    return {
+      title: 'Staffing import complete',
+      lines: [
+        `${result.created} teacher profile(s) created`,
+        `${result.updated} existing profile(s) updated`,
+        `${result.assignments_added} class assignment(s) added`,
+      ],
+    };
   };
 
   return (
-    <Dialog open={open} onOpenChange={close}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
-        <DialogHeader>
-          <DialogTitle>Bulk staffing import</DialogTitle>
-          <DialogDescription>Import teacher profiles, employment status, subject specialisations, class assignments, and Year Dean responsibility. Existing Teacher Numbers identify profiles and are never replaced.</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3">
-          <input type="file" accept=".xlsx,.xls,.csv" disabled={busy} onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) void readFile(file);
-          }} />
-          {fileName && <p className="text-xs text-muted-foreground">{fileName} · {rows.length} row(s)</p>}
-          <div className="rounded-lg bg-muted/40 p-3 text-xs text-muted-foreground">
-            Expected headers include Full Name, Teacher Number, Employment Status, Employment Start Date, Subject Specialisations, Homeroom Classes, Subject Classes, and Year Dean. Separate multiple subjects or classes with commas or semicolons. Class and year references must already exist.
-          </div>
-          {preview && (
-            <section className="space-y-2">
-              <div className="flex flex-wrap gap-3 text-sm">
-                <span>{preview.summary.create} new</span><span>{preview.summary.update} updates</span>
-                <span className={preview.summary.invalid ? 'text-destructive' : 'text-emerald-700'}>{preview.summary.invalid} invalid</span>
-              </div>
-              <div className="max-h-72 overflow-auto rounded-lg border border-border">
-                <table className="w-full min-w-[700px] text-left text-xs">
-                  <thead className="cp-table-head"><tr><th className="p-2">Row</th><th className="p-2">Teacher</th><th className="p-2">Teacher Number</th><th className="p-2">Action</th><th className="p-2">Employment</th><th className="p-2">Validation</th></tr></thead>
-                  <tbody>
-                    {preview.rows.map((row) => (
-                      <tr key={row.row} className="border-t border-border/60 align-top">
-                        <td className="p-2">{row.row}</td><td className="p-2 break-words">{row.full_name || '—'}</td>
-                        <td className="p-2">{row.teacher_number || '—'}</td><td className="p-2 capitalize">{row.operation}</td>
-                        <td className="p-2">{row.employment_status.replace('_', ' ')}</td>
-                        <td className="p-2 break-words text-destructive">{row.errors.join('; ') || 'Ready'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {preview.summary.invalid > 0 && <p className="text-xs text-muted-foreground">Correct the source spreadsheet and select it again. The import is atomic and cannot be partially applied.</p>}
-            </section>
-          )}
-        </div>
-        <DialogFooter className="gap-2">
-          <Button type="button" variant="outline" onClick={() => close(false)} disabled={busy}>Cancel</Button>
-          {!preview ? (
-            <Button type="button" onClick={review} disabled={busy || !rows.length}>{busy ? 'Validating…' : 'Preview and validate'}</Button>
-          ) : (
-            <Button type="button" onClick={apply} disabled={busy || preview.summary.invalid > 0}>{busy ? 'Applying…' : 'Confirm import'}</Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <ImportWizard
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Bulk teacher import"
+      description="Import teacher profiles, employment status, subject specialisations, class assignments and Year Dean responsibility. Existing Teacher Numbers identify profiles and are never replaced."
+      instructions="Separate multiple subjects or classes with commas or semicolons. Class and year references must already exist. The import is all-or-nothing."
+      templateControls={(
+        <label className="flex items-start gap-2 text-sm">
+          <Checkbox checked={includeExisting} onCheckedChange={(value) => setIncludeExisting(value === true)} className="mt-0.5" />
+          <span>Include current teachers in the template</span>
+        </label>
+      )}
+      onDownload={onDownload}
+      parseFile={parseFile}
+      runPreview={runPreview}
+      runCommit={runCommit}
+      confirmLabel="Confirm teacher import"
+      reportName="teacher-import-errors.csv"
+      onDone={onImported}
+    />
   );
 }

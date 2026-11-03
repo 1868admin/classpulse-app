@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import moment from 'moment';
-import { ClipboardCheck, CalendarDays, CheckCircle2, AlertCircle, Users } from 'lucide-react';
+import { ClipboardCheck, CalendarDays, CheckCircle2, AlertCircle, Users, Upload, CheckCheck } from 'lucide-react';
 import { base44 } from '@/api/base44Client';
 import { useSchool } from '@/context/SchoolContext';
 import AppShell from '@/components/shell/AppShell';
@@ -10,6 +10,8 @@ import EmptyState from '@/components/ui-bits/EmptyState';
 import ClassOrderControls from '@/components/ui-bits/ClassOrderControls';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import AttendanceImportDialog from '@/components/attendance/AttendanceImportDialog';
+import BulkMarkDialog from '@/components/attendance/BulkMarkDialog';
 import { fmtDate } from '@/lib/dates';
 import useOrderedItems from '@/hooks/useOrderedItems';
 
@@ -17,6 +19,8 @@ const attendanceClassKey = (item) => `${item.type}|${item.classId}`;
 const getOrderItemKey = (item) => item.key;
 
 export default function Attendance() {
+  const [importOpen, setImportOpen] = useState(false);
+  const [markOpen, setMarkOpen] = useState(false);
   const { schoolId, school, member, isStaff } = useSchool();
   const [params, setParams] = useSearchParams();
   const [date, setDate] = useState(params.get('date') || moment().format('YYYY-MM-DD'));
@@ -227,6 +231,8 @@ export default function Attendance() {
                 return current;
               }, { replace: true });
             }}>Today</Button>
+            <Button variant="outline" size="sm" onClick={() => setMarkOpen(true)}><CheckCheck className="mr-1.5 h-3.5 w-3.5" />Bulk mark</Button>
+            <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}><Upload className="mr-1.5 h-3.5 w-3.5" />Bulk import</Button>
             {selectedClass && <Button variant="outline" size="sm" onClick={() => {
               setParams((current) => {
                 current.delete('class');
@@ -393,6 +399,8 @@ export default function Attendance() {
           </div>
         </div>
       )}
+      <AttendanceImportDialog open={importOpen} onOpenChange={setImportOpen} onImported={load} />
+      <BulkMarkDialog open={markOpen} onOpenChange={setMarkOpen} onSaved={load} />
     </AppShell>
   );
 }

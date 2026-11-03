@@ -3,6 +3,7 @@ import { paginate, queryRecords } from './query.mjs';
 import { createLocalAccount, createLoginLink, disableAccount, ensureLocalAccount, getAccountForUser, setAccountActive, updateAccountCredentials, updateUser } from './auth.mjs';
 import { assertNoTimetableConflicts } from './timetable.mjs';
 import { manageInvigilation } from './invigilation.mjs';
+import { bulkAttendance, bulkSubjectClasses } from './bulk-import.mjs';
 
 const isStaff = (member) => member && ['school_admin', 'it_admin'].includes(member.role);
 const isSchoolAdmin = (member) => member?.role === 'school_admin';
@@ -199,7 +200,7 @@ function inspectStaffImport(schoolId, inputRows) {
   const seenNumbers = new Set();
   const seenNames = new Set();
   return inputRows.map((input, index) => {
-    const rowNumber = index + 2;
+    const rowNumber = Number(input.__row) || index + 2;
     const fullName = String(input.full_name || '').trim().replace(/\s+/g, ' ');
     const teacherNumber = normalizeTeacherNumber(input.teacher_number);
     const statusInput = String(input.employment_status || input.status || '').trim();
@@ -417,7 +418,28 @@ function manageStaff(actor, body) {
   requireStaff(member);
   const schoolId = member.school_id;
 
-  if (body.action === 'import_preview' || body.action === 'import_apply') {
+  if (body.action === 'import_template_data') {
+    const teachers = records('SchoolMember', (item) => item.school_id === schoolId && item.role === 'teacher');
+    const links = records('ClassTeacher', (link) => link.school_id === schoolId && link.is_active !== false);
+    const deans = records('YearGroup', (group) => group.school_id === schoolId);
+    return {
+      homerooms: records('HomeroomClass', (item) => item.school_id === schoolId && !item.archived).map((item) => item.name),
+      subject_classes: records('SubjectClass', (item) => item.school_id === schoolId && !item.archived).map((item) => item.name),
+      year_groups: deans.map((group) => group.name),
+      teachers: teachers.map((teacher) => ({
+        full_name: teacher.full_name,
+        teacher_number: teacher.teacher_number || '',
+        employment_status: teacherEmploymentStatus(teacher),
+        employment_start_date: teacher.employment_start_date || '',
+        subject_specialisms: readSubjectSpecialisms(teacher.subject_specialisms),
+        homeroom_classes: links.filter((link) => link.member_id === teacher.id && link.class_type === 'homeroom').map((link) => link.class_name),
+        subject_classes: links.filter((link) => link.member_id === teacher.id && link.class_type === 'subject').map((link) => link.class_name),
+        year_dean: deans.filter((group) => group.dean_member_id === teacher.id).map((group) => group.name),
+      })),
+    };
+  }
+
+  if (body.action === 'import_apply' || body.action === 'import_preview') {
     const previewRows = inspectStaffImport(schoolId, body.rows);
     const errors = previewRows.flatMap((row) => row.errors.map((message) => ({ row: row.row, message })));
     if (body.action === 'import_preview') {
@@ -2664,6 +2686,8 @@ export function invokeFunction(name, actor, body = {}) {
     publishExaminationSchedule,
     archiveExaminationSchedule,
     manageInvigilation,
+    bulkAttendance,
+    bulkSubjectClasses,
     submitAttendance,
     bulkStudentAction,
     importStudents, // Ensure this key is present and points to function importStudents
