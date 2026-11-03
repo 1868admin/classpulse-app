@@ -2,6 +2,8 @@ import { Link } from 'react-router-dom';
 import moment from 'moment';
 import { ClipboardCheck, BookOpen, CalendarClock, GraduationCap, ArrowRight, CheckCircle2, AlertCircle } from 'lucide-react';
 import AppShell from '@/components/shell/AppShell';
+import AttendanceOverview from '@/components/dashboard/AttendanceOverview';
+import Calendar from '@/pages/Calendar';
 import HeroPanel from '@/components/dashboard/HeroPanel';
 import TeacherDocuments from '@/components/timetable/TeacherDocuments';
 import StatCard from '@/components/dashboard/StatCard';
@@ -49,6 +51,8 @@ export default function TeacherDashboard() {
           <StatCard icon={CalendarClock} label="Lessons today" value={data.loading ? '—' : (data.todayEntries || []).length} tone="amber" />
           <StatCard icon={ClipboardCheck} label="Unsubmitted" value={data.loading ? '—' : data.outstanding} tone="green" />
         </div>
+
+        <AttendanceOverview attendanceRows={data.attendanceRows} loading={data.loading} />
 
         {data.homeroomRows?.length > 0 && (
           <section className="cp-card overflow-hidden">
@@ -163,6 +167,7 @@ export default function TeacherDashboard() {
               <Link to="/attendance" className="text-xs font-semibold text-primary hover:underline">Attendance history</Link>
             </div>
           </div>
+          <Calendar compact />
         </div>
       </div>
     </AppShell>

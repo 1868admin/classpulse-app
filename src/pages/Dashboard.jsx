@@ -11,6 +11,8 @@ import {
   YAxis,
 } from 'recharts';
 import AppShell from '@/components/shell/AppShell';
+import AttendanceOverview from '@/components/dashboard/AttendanceOverview';
+import Calendar from '@/pages/Calendar';
 import { useSchool } from '@/context/SchoolContext';
 import { useAdminDashboard } from '@/hooks/useDashboard';
 import TeacherDashboard from '@/pages/TeacherDashboard';
@@ -33,85 +35,31 @@ function StatTile({ icon: Icon, label, value, detail, tone = 'default' }) {
   );
 }
 
-function AttendanceStatus({ status }) {
-  const styles = {
-    complete: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
-    partial: 'border-amber-500/25 bg-amber-500/10 text-amber-600 dark:text-amber-400',
-    not_taken: 'border-amber-500/25 bg-amber-500/10 text-amber-600 dark:text-amber-400',
-  };
-  const labels = { complete: 'Complete', partial: 'Partially complete', not_taken: 'Not taken' };
-  return (
-    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-medium ${styles[status]}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${status === 'complete' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-      {labels[status]}
-    </span>
-  );
-}
-
 function percentLabel(value) {
   return value === null || value === undefined ? '—' : `${value.toFixed(1)}%`;
 }
 
-function ClassAttendance({ classes }) {
-  if (!classes.length) {
-    return <p className="px-4 py-8 text-center text-sm text-muted-foreground">No active homeroom classes yet.</p>;
-  }
-
-  return (
-    <>
-      <div className="hidden max-h-[300px] overflow-auto md:block">
-        <table className="w-full min-w-[700px] text-sm">
-          <thead className="sticky top-0 z-10 bg-card text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
-            <tr>
-              <th className="px-4 pb-2 text-left">Class</th>
-              <th className="px-4 pb-2 text-left">Enrolled</th>
-              <th className="px-4 pb-2 text-left">Boys present</th>
-              <th className="px-4 pb-2 text-left">Girls present</th>
-              <th className="px-4 pb-2 text-left">Today</th>
-              <th className="px-4 pb-2 text-right">Month</th>
-            </tr>
-          </thead>
-          <tbody>
-            {classes.map((klass) => (
-              <tr key={klass.id} className="border-t border-border/70">
-                <td className="px-4 py-2 font-medium">{klass.name}</td>
-                <td className="px-4 py-2 text-muted-foreground">{klass.enrolled}</td>
-                <td className="px-4 py-2 text-muted-foreground">{klass.boysPresent}</td>
-                <td className="px-4 py-2 text-muted-foreground">{klass.girlsPresent}</td>
-                <td className="px-4 py-2.5"><AttendanceStatus status={klass.todayStatus} /></td>
-                <td className="px-4 py-2 text-right font-semibold text-emerald-600 dark:text-emerald-400">{percentLabel(klass.monthRate)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="max-h-[300px] divide-y divide-border/70 overflow-y-auto md:hidden">
-        {classes.map((klass) => (
-          <div key={klass.id} className="space-y-2.5 px-4 py-3">
-            <div className="flex items-start justify-between gap-3">
-              <p className="min-w-0 truncate text-sm font-semibold">{klass.name}</p>
-              <AttendanceStatus status={klass.todayStatus} />
-            </div>
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>{klass.enrolled} enrolled</span>
-              <span>Month <strong className="text-emerald-600 dark:text-emerald-400">{percentLabel(klass.monthRate)}</strong></span>
-            </div>
-            <div className="flex items-center gap-4 text-xs text-muted-foreground">
-              <span>Boys present <strong className="text-foreground">{klass.boysPresent}</strong></span>
-              <span>Girls present <strong className="text-foreground">{klass.girlsPresent}</strong></span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </>
-  );
-}
-
 export default function Dashboard() {
-  const { schoolId, school, isStaff, isTeacher } = useSchool();
-  const admin = useAdminDashboard(schoolId, school?.attendance_alert_threshold);
+  const { schoolId, school, isStaff, isTeacher, isPlatformAdmin } = useSchool();
+  const isTeacherView = isTeacher && !isStaff && !isPlatformAdmin;
+  const admin = useAdminDashboard(isTeacherView ? '' : schoolId, school?.attendance_alert_threshold);
 
-  if (isTeacher && !isStaff) return <TeacherDashboard />;
+  if (isTeacherView) return <TeacherDashboard />;
+  if (isPlatformAdmin && !schoolId) {
+    return (
+      <AppShell title="Dashboard">
+        <section className="cp-card p-5 sm:p-6">
+          <h1 className="font-heading text-2xl font-semibold">Platform dashboard</h1>
+          <p className="mt-2 max-w-xl text-sm text-muted-foreground">
+            Choose a school from platform administration to view its attendance and calendar data.
+          </p>
+          <Link to="/platform" className="mt-4 inline-flex rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground">
+            Manage schools
+          </Link>
+        </section>
+      </AppShell>
+    );
+  }
 
   const outstanding = Math.max(0, admin.homerooms - admin.registerCount);
   const attendanceThisMonth = admin.monthTotals.students
@@ -169,15 +117,9 @@ export default function Dashboard() {
         </div>
 
         <div className="grid min-w-0 gap-4 lg:grid-cols-3">
-          <section className="cp-card min-w-0 overflow-hidden lg:col-span-2">
-            <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-4 sm:px-5">
-              <h2 className="font-heading text-lg font-semibold">Classes</h2>
-              <Link to="/homerooms" className="shrink-0 text-xs font-semibold text-emerald-600 hover:underline dark:text-emerald-400">Manage classes</Link>
-            </div>
-            {admin.loading
-              ? <p className="px-5 py-6 text-sm text-muted-foreground">Loading class attendance…</p>
-              : <ClassAttendance classes={admin.classRows} />}
-          </section>
+          <div className="min-w-0 lg:col-span-2">
+            <AttendanceOverview attendanceRows={admin.attendanceRows} loading={admin.loading} />
+          </div>
 
           <section className="cp-card min-w-0 p-4 sm:p-5">
             <div className="flex items-center gap-2">
@@ -239,6 +181,7 @@ export default function Dashboard() {
             )}
           </div>
         </section>
+        <Calendar compact />
         {admin.dataTruncated && (
           <p className="text-xs text-amber-700 dark:text-amber-300">Some dashboard figures are limited to the first 100,000 records. Narrow the date range in Reports for a complete detailed view.</p>
         )}

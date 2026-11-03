@@ -180,11 +180,14 @@ Then open `http://127.0.0.1:4400`.
 - Homeroom, subject-class, and attendance lists have per-user up/down ordering
   controls. The preference is saved in that user's browser and does not change
   class or student records.
-- The dashboard summarizes homeroom attendance by class and month. School
+- The dashboard provides Morning Form, Afternoon Form, and Subject Lessons
+  register views with enrollment, attendance counts, assigned teachers, status,
+  search, and register actions. Its monthly calendar reuses school-day,
+  timetable, examination, invigilation, and attendance data. School
   administrators can set the monthly student attendance alert threshold in
   **Settings → School details**. Homeroom dashboards also show the number of
   boys and girls marked present for each class. Teachers' attendance analytics
-  are restricted to classes assigned to them.
+  and register actions are restricted to classes assigned to them.
 
 ## Staff lifecycle and assignments
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { todayStr, fmtTime } from '@/lib/dates';
+import { notifyError } from '@/lib/notify';
 import moment from 'moment';
 
 async function fetchAllPages(entity, query, sort) {
@@ -21,6 +22,115 @@ async function fetchAllPages(entity, query, sort) {
 
 const EMPTY_TOTALS = { students: 0, present: 0, absent: 0, late: 0, excused: 0 };
 
+function registerRow({ klass, type, label, session, teachers = [], periods = [], date, enrolled = 0 }) {
+  const present = Number(session?.present_count || 0);
+  const absent = Number(session?.absent_count || 0);
+  const late = Number(session?.late_count || 0);
+  const assignedTeachers = [...new Set(teachers.filter(Boolean))];
+  return {
+    key: `${type}|${klass.id}|${label}`,
+    classId: klass.id,
+    className: klass.name,
+    classType: type,
+    subject: klass.subject || '',
+    label,
+    periods,
+    date,
+    teachers: assignedTeachers,
+    teacher: assignedTeachers.join(', ') || session?.member_name || '—',
+    enrolled,
+    present,
+    absent,
+    late,
+    rate: enrolled ? ((present + late) / enrolled) * 100 : null,
+    session: session || null,
+  };
+}
+
+function sessionMatches(session, classId, label, periods = []) {
+  if (session.class_id !== classId) return false;
+  if (session.session_label === label) return true;
+  const savedPeriods = Array.isArray(session.period_numbers) && session.period_numbers.length
+    ? session.period_numbers.map(Number)
+    : [Number(session.period_number)].filter(Boolean);
+  return periods.some((period) => savedPeriods.includes(Number(period)));
+}
+
+function subjectLessonRows(entries, classes, sessions, classLinks, counts, date) {
+  const classesById = new Map(classes.map((klass) => [klass.id, klass]));
+  const grouped = new Map();
+  entries.filter((entry) => entry.day_name && entry.subject_class_id).forEach((entry) => {
+    const key = `${entry.member_id}|${entry.subject_class_id}|${entry.subject || ''}`;
+    const group = grouped.get(key) || [];
+    group.push(entry);
+    grouped.set(key, group);
+  });
+
+  const rows = [];
+  const representedSessions = new Set();
+  for (const group of grouped.values()) {
+    const sorted = [...group].sort((a, b) => Number(a.period_number) - Number(b.period_number));
+    for (let index = 0; index < sorted.length; index += 1) {
+      const current = sorted[index];
+      const next = sorted[index + 1];
+      const period = Number(current.period_number);
+      const isDouble = next && Number(next.period_number) === period + 1;
+      const periods = isDouble ? [period, Number(next.period_number)] : [period];
+      if (isDouble) index += 1;
+      const klass = classesById.get(current.subject_class_id);
+      if (!klass) continue;
+      const label = periods.length > 1 ? `Periods ${periods.join(' + ')}` : `Period ${period}`;
+      const session = sessions.find((item) => item.class_type === 'subject'
+        && sessionMatches(item, klass.id, label, periods)) || null;
+      if (session) representedSessions.add(session.id);
+      const teachers = classLinks
+        .filter((link) => link.class_id === klass.id && link.class_type === 'subject')
+        .map((link) => link.member_name);
+      if (current.member_name) teachers.push(current.member_name);
+      rows.push(registerRow({
+        klass,
+        type: 'subject',
+        label,
+        periods,
+        session,
+        teachers,
+        enrolled: counts.get(klass.id) || 0,
+        date,
+      }));
+    }
+  }
+
+  sessions.filter((session) => session.class_type === 'subject' && !representedSessions.has(session.id))
+    .forEach((session) => {
+      const klass = classesById.get(session.class_id);
+      if (!klass) return;
+      const teachers = classLinks
+        .filter((link) => link.class_id === klass.id && link.class_type === 'subject')
+        .map((link) => link.member_name);
+      rows.push(registerRow({
+        klass,
+        type: 'subject',
+        label: session.session_label || 'Class session',
+        periods: Array.isArray(session.period_numbers) ? session.period_numbers : [],
+        session,
+        teachers,
+        enrolled: counts.get(klass.id) || 0,
+        date,
+      }));
+    });
+  const uniqueRows = new Map();
+  rows.forEach((row) => {
+    const existing = uniqueRows.get(row.key);
+    if (!existing) {
+      uniqueRows.set(row.key, row);
+      return;
+    }
+    existing.teachers = [...new Set([...existing.teachers, ...row.teachers])];
+    existing.teacher = existing.teachers.join(', ') || existing.teacher;
+  });
+  return [...uniqueRows.values()];
+}
+
 export function useAdminDashboard(schoolId, alertThreshold) {
   const [data, setData] = useState({
     loading: true,
@@ -28,6 +138,7 @@ export function useAdminDashboard(schoolId, alertThreshold) {
     homerooms: 0,
     homeroomList: [],
     classRows: [],
+    attendanceRows: { morning: [], afternoon: [], subject: [] },
     sessions: [],
     totals: EMPTY_TOTALS,
     monthTotals: EMPTY_TOTALS,
@@ -38,20 +149,29 @@ export function useAdminDashboard(schoolId, alertThreshold) {
     flaggedStudents: [],
     threshold: 90,
     dataTruncated: false,
+    error: null,
   });
   const today = todayStr();
   const monthStart = moment().startOf('month').format('YYYY-MM-DD');
 
   const load = useCallback(async () => {
     if (!schoolId) return;
-    setData((current) => ({ ...current, loading: true }));
-    const [studentCount, classesPage, membershipsResult, todayResult, todayRecordsResult, monthResult] = await Promise.all([
+    setData((current) => ({ ...current, loading: true, error: null }));
+    try {
+    const [studentCount, homeroomsPage, subjectClassesPage, membershipsResult, classLinksResult, timetableResult, calendarResult, todayResult, todayRecordsResult, monthResult] = await Promise.all([
       base44.entities.Student.count({ school_id: schoolId, archived: false, status: 'active' }),
       base44.entities.HomeroomClass.filter(
         { school_id: schoolId, archived: false },
         { limit: 1000, sort: 'name' },
       ),
-      fetchAllPages('ClassMembership', { school_id: schoolId, class_type: 'homeroom' }, 'student_name'),
+      base44.entities.SubjectClass.filter(
+        { school_id: schoolId, archived: false },
+        { limit: 1000, sort: 'name' },
+      ),
+      fetchAllPages('ClassMembership', { school_id: schoolId }, 'student_name'),
+      fetchAllPages('ClassTeacher', { school_id: schoolId, is_active: { $ne: false } }, 'member_name'),
+      fetchAllPages('TimetableEntry', { school_id: schoolId, archived: false }, 'period_number'),
+      base44.entities.CalendarDate.filter({ school_id: schoolId, date: today }, { limit: 1 }),
       fetchAllPages('AttendanceSession', { school_id: schoolId, date: today }),
       fetchAllPages('AttendanceRecord', { school_id: schoolId, class_type: 'homeroom', date: today }),
       fetchAllPages('AttendanceRecord', {
@@ -61,8 +181,11 @@ export function useAdminDashboard(schoolId, alertThreshold) {
       }),
     ]);
 
-    const classes = classesPage.items || [];
+    const classes = homeroomsPage.items || [];
+    const subjectClasses = subjectClassesPage.items || [];
     const memberships = membershipsResult.items;
+    const classLinks = classLinksResult.items;
+    const timetableEntries = timetableResult.items;
     const todaySessions = todayResult.items;
     const todayRecords = todayRecordsResult.items;
     const monthRecords = monthResult.items;
@@ -160,6 +283,37 @@ export function useAdminDashboard(schoolId, alertThreshold) {
         monthRate: percent(monthStats.present + monthStats.late, monthStats.total),
       };
     });
+    const dailyRows = (label) => classes.map((klass) => {
+      const session = todaySessions.find((item) => item.class_type === 'homeroom'
+        && item.class_id === klass.id && item.session_label === label);
+      const teachers = classLinks
+        .filter((link) => link.class_id === klass.id && link.class_type === 'homeroom')
+        .map((link) => link.member_name);
+      return registerRow({
+        klass,
+        type: 'homeroom',
+        label,
+        session,
+        teachers,
+        enrolled: classCounts.get(klass.id) || 0,
+        date: today,
+      });
+    });
+    const calendarToday = (calendarResult.items || [])[0];
+    const todayLessonEntries = timetableEntries.filter((entry) =>
+      calendarToday?.day_type === 'cycle' && entry.day_name === calendarToday.day_name);
+    const attendanceRows = {
+      morning: dailyRows('Morning'),
+      afternoon: dailyRows('Afternoon'),
+      subject: subjectLessonRows(
+        todayLessonEntries,
+        subjectClasses,
+        todaySessions,
+        classLinks,
+        classCounts,
+        today,
+      ),
+    };
     const attendanceDays = moment().date();
     const monthlyTrend = Array.from({ length: attendanceDays }, (_, index) => {
       const date = moment().startOf('month').add(index, 'days').format('YYYY-MM-DD');
@@ -194,6 +348,7 @@ export function useAdminDashboard(schoolId, alertThreshold) {
       homerooms: classes.length,
       homeroomList: classes,
       classRows,
+      attendanceRows,
       sessions: todaySessions,
       totals: todayTotals,
       monthTotals: monthlyTotals,
@@ -203,8 +358,13 @@ export function useAdminDashboard(schoolId, alertThreshold) {
       recordedDays: trendByDate.size,
       flaggedStudents,
       threshold,
-      dataTruncated: membershipsResult.truncated || todayResult.truncated || todayRecordsResult.truncated || monthResult.truncated,
+      dataTruncated: membershipsResult.truncated || classLinksResult.truncated || timetableResult.truncated
+        || todayResult.truncated || todayRecordsResult.truncated || monthResult.truncated,
     });
+    } catch (error) {
+      notifyError('Could not load dashboard', error?.message || 'Dashboard data could not be loaded.');
+      setData((current) => ({ ...current, loading: false, error }));
+    }
   }, [schoolId, today, monthStart, alertThreshold]);
 
   useEffect(() => { load(); }, [load]);
@@ -215,17 +375,19 @@ export function useTeacherDashboard(schoolId, memberId) {
   const [data, setData] = useState({
     loading: true, classLinks: [], entries: [], todayEntries: [], sessions: [], calendar: null,
     dayName: '', homeroomCount: 0, subjectCount: 0, studentTotal: 0, submittedToday: 0, outstanding: 0,
-    supervisionAssignments: [],
+    supervisionAssignments: [], homeroomRows: [], attendanceRows: { morning: [], afternoon: [], subject: [] },
+    hasNoSchool: false, calendarMissing: false, error: null,
   });
   const today = todayStr();
 
   const load = useCallback(async () => {
     if (!schoolId || !memberId) return;
-    setData((current) => ({ ...current, loading: true }));
+    setData((current) => ({ ...current, loading: true, error: null }));
+    try {
     const [links, entries, sessions, calendar, supervision] = await Promise.all([
       base44.entities.ClassTeacher.filter({ school_id: schoolId, member_id: memberId, is_active: { $ne: false } }, { limit: 200 }),
-      base44.entities.TimetableEntry.filter({ school_id: schoolId, member_id: memberId, archived: false }, { limit: 200 }),
-      base44.entities.AttendanceSession.filter({ school_id: schoolId, date: today, member_id: memberId }, { limit: 100 }),
+      base44.entities.TimetableEntry.filter({ school_id: schoolId, member_id: memberId, archived: false, published: { $ne: false } }, { limit: 200 }),
+      base44.entities.AttendanceSession.filter({ school_id: schoolId, date: today }, { limit: 300 }),
       base44.entities.CalendarDate.filter({ school_id: schoolId, date: today }, { limit: 1 }),
       base44.entities.InvigilationAssignment.filter(
         { school_id: schoolId, teacher_member_id: memberId, status: 'published', exam_date: { $gte: today } },
@@ -240,30 +402,47 @@ export function useTeacherDashboard(schoolId, memberId) {
       .filter((entry) => entry.day_name === dayName)
       .sort((a, b) => a.period_number - b.period_number);
 
-    const classIds = classLinks.map((link) => link.class_id);
+    const classIds = [...new Set(classLinks.map((link) => link.class_id))];
+    const enrollmentByClass = new Map();
     let studentTotal = 0;
-    for (const id of classIds.slice(0, 20)) {
-      studentTotal += await base44.entities.ClassMembership.count({ school_id: schoolId, class_id: id });
-    }
+    const enrollments = await Promise.all(classIds.map(async (id) => [
+      id,
+      await base44.entities.ClassMembership.count({ school_id: schoolId, class_id: id }),
+    ]));
+    enrollments.forEach(([id, count]) => {
+      enrollmentByClass.set(id, count);
+      studentTotal += count;
+    });
 
     const subjectClassIds = new Set(classLinks.filter((link) => link.class_type === 'subject').map((link) => link.class_id));
     const homeroomIds = new Set(classLinks.filter((link) => link.class_type === 'homeroom').map((link) => link.class_id));
     const assignedHomeroomIds = [...homeroomIds];
-    const [homeroomClasses, presentRecords] = assignedHomeroomIds.length
+    const assignedSubjectIds = [...subjectClassIds];
+    const [homeroomClasses, assignedSubjectClasses, presentRecords] = assignedHomeroomIds.length || assignedSubjectIds.length
       ? await Promise.all([
-        base44.entities.HomeroomClass.filter(
-          { school_id: schoolId, id: { $in: assignedHomeroomIds } },
-          { limit: 200 },
-        ),
-        base44.entities.AttendanceRecord.filter({
-          school_id: schoolId,
-          class_type: 'homeroom',
-          class_id: { $in: assignedHomeroomIds },
-          date: today,
-          status: 'present',
-        }, { limit: 1000 }),
+        assignedHomeroomIds.length
+          ? base44.entities.HomeroomClass.filter(
+            { school_id: schoolId, id: { $in: assignedHomeroomIds } },
+            { limit: 200 },
+          )
+          : Promise.resolve({ items: [] }),
+        assignedSubjectIds.length
+          ? base44.entities.SubjectClass.filter(
+            { school_id: schoolId, id: { $in: assignedSubjectIds } },
+            { limit: 200 },
+          )
+          : Promise.resolve({ items: [] }),
+        assignedHomeroomIds.length
+          ? base44.entities.AttendanceRecord.filter({
+            school_id: schoolId,
+            class_type: 'homeroom',
+            class_id: { $in: assignedHomeroomIds },
+            date: today,
+            status: 'present',
+          }, { limit: 1000 })
+          : Promise.resolve({ items: [] }),
       ])
-      : [{ items: [] }, { items: [] }];
+      : [{ items: [] }, { items: [] }, { items: [] }];
     const presentRecordsList = presentRecords.items || [];
     const presentStudentIds = [...new Set(presentRecordsList.map((record) => record.student_id))];
     const presentStudents = presentStudentIds.length
@@ -289,6 +468,35 @@ export function useTeacherDashboard(schoolId, memberId) {
       boysPresent: (presentCountsByClass.get(klass.id)?.boys || new Set()).size,
       girlsPresent: (presentCountsByClass.get(klass.id)?.girls || new Set()).size,
     }));
+    const homeroomById = new Map((homeroomClasses.items || []).map((klass) => [klass.id, klass]));
+    const assignedSubjects = assignedSubjectClasses.items || [];
+    const dailyRows = (label) => [...homeroomIds].map((id) => {
+      const klass = homeroomById.get(id);
+      if (!klass) return null;
+      const session = todaySessions.find((item) => item.class_type === 'homeroom'
+        && item.class_id === id && item.session_label === label);
+      return registerRow({
+        klass,
+        type: 'homeroom',
+        label,
+        session,
+        teachers: classLinks.filter((link) => link.class_id === id).map((link) => link.member_name),
+        enrolled: enrollmentByClass.get(id) || 0,
+        date: today,
+      });
+    }).filter(Boolean);
+    const attendanceRows = {
+      morning: dailyRows('Morning'),
+      afternoon: dailyRows('Afternoon'),
+      subject: subjectLessonRows(
+        todayEntries,
+        assignedSubjects,
+        todaySessions,
+        classLinks,
+        enrollmentByClass,
+        today,
+      ),
+    };
 
     setData({
       loading: false,
@@ -300,6 +508,7 @@ export function useTeacherDashboard(schoolId, memberId) {
       dayName,
       homeroomCount: homeroomIds.size,
       homeroomRows,
+      attendanceRows,
       subjectCount: subjectClassIds.size,
       studentTotal,
       submittedToday: todaySessions.length,
@@ -308,6 +517,10 @@ export function useTeacherDashboard(schoolId, memberId) {
       hasNoSchool: calendarToday?.day_type === 'no_school',
       calendarMissing: !calendarToday,
     });
+    } catch (error) {
+      notifyError('Could not load dashboard', error?.message || 'Dashboard data could not be loaded.');
+      setData((current) => ({ ...current, loading: false, error }));
+    }
   }, [schoolId, memberId, today]);
 
   useEffect(() => { load(); }, [load]);
