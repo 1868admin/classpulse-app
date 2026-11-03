@@ -35,7 +35,7 @@ export default function Calendar() {
         base44.entities.HomeroomClass.filter({ school_id: schoolId, archived: false }, { limit: 200 }),
         base44.entities.SubjectClass.filter({ school_id: schoolId, archived: false }, { limit: 300 }),
         isStaff || !member ? Promise.resolve({ items: [] })
-          : base44.entities.ClassTeacher.filter({ school_id: schoolId, member_id: member.id }, { limit: 300 }),
+          : base44.entities.ClassTeacher.filter({ school_id: schoolId, member_id: member.id, is_active: { $ne: false } }, { limit: 300 }),
       ]);
       const availableIds = isStaff ? null : new Set((teacherPage.items || []).map((link) => link.class_id));
       setRecords(calendarPage.items || []);

@@ -46,7 +46,7 @@ export default function Academic() {
       base44.entities.Student.filter({ school_id: schoolId, archived: { $ne: true } }, { limit: 500, sort: 'surname' }),
       base44.entities.SubjectClass.filter({ school_id: schoolId, archived: false }, { limit: 200, sort: 'name' }),
       member && !isStaff
-        ? base44.entities.ClassTeacher.filter({ school_id: schoolId, member_id: member.id }, { limit: 200 })
+        ? base44.entities.ClassTeacher.filter({ school_id: schoolId, member_id: member.id, is_active: { $ne: false } }, { limit: 200 })
         : Promise.resolve({ items: [] }),
     ]);
     setYears(y.items || []);

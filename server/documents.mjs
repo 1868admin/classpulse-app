@@ -256,7 +256,9 @@ function periodList(school, entries) {
 const periodLabel = (period) => `Period ${period.number}${period.start && period.end ? `\n${period.start}-${period.end}` : ''}`;
 
 function lessonCell(entry, show) {
-  return [entry.subject, show.includes('class') && entry.class_name, show.includes('teacher') && entry.teacherName, show.includes('room') && entry.room && `Room ${entry.room}`]
+  return [entry.reassignment_required && 'REASSIGNMENT REQUIRED', entry.subject,
+    show.includes('class') && entry.class_name, show.includes('teacher') && entry.teacherName,
+    show.includes('room') && entry.room && `Room ${entry.room}`]
     .filter(Boolean).join('\n');
 }
 
@@ -298,7 +300,7 @@ function masterTimetable(ctx, school, entries) {
       ...periods.map((period) => entries
         .filter((entry) => entry.day_name === day && Number(entry.period_number) === period.number
           && (entry.teacherName || 'Unassigned') === teacher)
-        .map((entry) => [entry.subject, entry.class_name, entry.room && `Rm ${entry.room}`].filter(Boolean).join(' | '))
+        .map((entry) => [entry.reassignment_required && 'REASSIGNMENT REQUIRED', entry.subject, entry.class_name, entry.room && `Rm ${entry.room}`].filter(Boolean).join(' | '))
         .join('\n')),
     ]);
     drawTable(ctx, {
@@ -417,7 +419,7 @@ export function renderDocument(actor, request) {
     drawTable(ctx, {
       columns: ['Date', 'Time', 'Examination', 'Subject', 'Room', 'Role'].map((header, index) => ({ header, weight: [1, 1, 2, 1.6, 1.4, 1.2][index] })),
       rows: [...assignments].sort((a, b) => byText(`${a.exam_date} ${a.start_time}`, `${b.exam_date} ${b.start_time}`))
-        .map((item) => [item.exam_date, `${item.start_time}-${item.end_time}`, item.exam_name, item.subject, item.room, item.role === 'chief' ? 'Chief supervisor' : 'Assistant supervisor']),
+        .map((item) => [item.exam_date, `${item.start_time}-${item.end_time}`, `${item.reassignment_required ? 'REASSIGNMENT REQUIRED · ' : ''}${item.exam_name}`, item.subject, item.room, item.role === 'chief' ? 'Chief supervisor' : 'Assistant supervisor']),
       emptyMessage: 'No supervision duties are assigned.',
     });
     result = { ctx, name: `supervision-schedule-${slug(teacher.full_name)}`, count: assignments.length };
@@ -434,7 +436,7 @@ export function renderDocument(actor, request) {
       .map((exam) => {
         const people = grouped.get(exam.id)
           .sort((a, b) => (a.role === b.role ? byText(a.teacher_name, b.teacher_name) : a.role === 'chief' ? -1 : 1))
-          .map((item) => `${teacherNames.get(item.teacher_member_id) || item.teacher_name}${item.role === 'chief' ? ' (Chief)' : ''}${item.status === 'draft' ? ' [draft]' : ''}`);
+          .map((item) => `${item.reassignment_required ? '[REASSIGNMENT REQUIRED] ' : ''}${teacherNames.get(item.teacher_member_id) || item.teacher_name}${item.role === 'chief' ? ' (Chief)' : ''}${item.status === 'draft' ? ' [draft]' : ''}`);
         return [exam.exam_date, `${exam.start_time}-${exam.end_time}`, exam.exam_name, exam.subject, exam.room, people.join('\n')];
       });
     const ctx = createPdf({

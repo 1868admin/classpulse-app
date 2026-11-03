@@ -23,6 +23,8 @@
     "override_by": { "type": "string" },
     "override_at": { "type": "string" },
     "removal_reason": { "type": "string" },
+    "reassignment_required": { "type": "boolean", "default": false },
+    "staffing_issue_reason": { "type": "string" },
     "created_by": { "type": "string" },
     "updated_at": { "type": "string" }
   },

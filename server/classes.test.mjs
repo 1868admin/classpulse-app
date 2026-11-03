@@ -82,8 +82,9 @@ test('class, teacher, student and batch-query workflows', async () => {
       { entity: 'ClassTeacher', query: { school_id: school.id, class_id: homeroom.data.class.id } },
     ])).data.results;
     assert.deepEqual(classes.items.map((item) => item.name), ['Form 1B']);
-    assert.equal(links.items.length, 1);
-    assert.equal(links.items[0].class_name, 'Form 1B');
+    assert.equal(links.items.length, 2, 'removed class assignments are kept as history');
+    assert.equal(links.items.filter((link) => link.is_active !== false).length, 1);
+    assert.equal(links.items.find((link) => link.is_active !== false).class_name, 'Form 1B');
     assert.equal((await batch([{ entity: 'Nope' }])).status, 404);
 
     const imported = await fn('importStudents', {

@@ -40,7 +40,7 @@ export default function ClassFormDialog({ open, onOpenChange, type = 'subject', 
         return;
       }
       try {
-        const links = await base44.entities.ClassTeacher.filter({ school_id: schoolId, class_id: klass.id }, { limit: 50 });
+        const links = await base44.entities.ClassTeacher.filter({ school_id: schoolId, class_id: klass.id, is_active: { $ne: false } }, { limit: 50 });
         if (cancelled) return;
         const items = links.items || [];
         setTeacherIds(items.map((l) => l.member_id));

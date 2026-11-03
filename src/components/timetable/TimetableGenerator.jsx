@@ -71,8 +71,8 @@ export default function TimetableGenerator({ schoolId, school, academicYearId, o
     try {
       const [classPage, teacherPage, linkPage, availabilityPage, entryPage] = await Promise.all([
         base44.entities.SubjectClass.filter({ school_id: schoolId, archived: false }, { limit: 500, sort: 'name' }),
-        base44.entities.SchoolMember.filter({ school_id: schoolId, role: 'teacher', status: 'active' }, { limit: 500, sort: 'full_name' }),
-        base44.entities.ClassTeacher.filter({ school_id: schoolId, class_type: 'subject' }, { limit: 1000 }),
+        base44.entities.SchoolMember.filter({ school_id: schoolId, role: 'teacher', status: 'active', employment_status: { $ne: 'on_leave' } }, { limit: 500, sort: 'full_name' }),
+        base44.entities.ClassTeacher.filter({ school_id: schoolId, class_type: 'subject', is_active: { $ne: false } }, { limit: 1000 }),
         base44.entities.TeacherAvailability.filter({
           school_id: schoolId,
           academic_year_id: academicYearId,

@@ -186,6 +186,24 @@ Then open `http://127.0.0.1:4400`.
   boys and girls marked present for each class. Teachers' attendance analytics
   are restricted to classes assigned to them.
 
+## Staff lifecycle and assignments
+
+- Staff profiles are separate from login accounts. Administrators can create a
+  teacher profile without a login and add an account later. Teacher Number and
+  profile ID remain unchanged through leave, departure, and reinstatement.
+- The Staff page supports active, on-leave, and departed filters, employment
+  history, and a review of affected classes, lessons, students, and upcoming
+  invigilation duties before a status change. Departed teachers lose account
+  access; their class assignments are retained as inactive history, and their
+  schedule records are flagged for administrator reassignment rather than
+  deleted. Reinstatement restores the existing account but does not restore
+  old assignments.
+- Administrators can review and apply multi-class teacher assignments, or
+  import staff from `.csv`, `.xls`, and `.xlsx` spreadsheets. Import preview
+  matches existing profiles by Teacher Number, reports possible name
+  duplicates and invalid class/year references, and must be corrected before
+  the changes are applied.
+
 ## One-time migration from Base44
 
 The app itself does not need Base44 or Deno. Exporting hosted data requires

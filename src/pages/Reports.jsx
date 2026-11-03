@@ -85,7 +85,7 @@ export default function Reports() {
     (async () => {
       let links = [];
       if (isTeacher) {
-        const result = await fetchAll('ClassTeacher', { school_id: schoolId, member_id: member.id }, 10);
+        const result = await fetchAll('ClassTeacher', { school_id: schoolId, member_id: member.id, is_active: { $ne: false } }, 10);
         links = result.items;
       }
 

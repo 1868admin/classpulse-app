@@ -31,6 +31,44 @@
       ],
       "default": "active"
     },
+    "employment_status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "on_leave",
+        "departed"
+      ],
+      "default": "active"
+    },
+    "employment_start_date": {
+      "type": "string"
+    },
+    "leave_date": {
+      "type": "string"
+    },
+    "departure_date": {
+      "type": "string"
+    },
+    "return_date": {
+      "type": "string"
+    },
+    "employment_reason": {
+      "type": "string"
+    },
+    "employment_history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "from_status": { "type": "string" },
+          "to_status": { "type": "string" },
+          "effective_date": { "type": "string" },
+          "reason": { "type": "string" },
+          "changed_at": { "type": "string" }
+        }
+      },
+      "default": []
+    },
     "username": {
       "type": "string"
     },

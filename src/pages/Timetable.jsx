@@ -29,7 +29,7 @@ const MANAGEMENT_VIEWS = [
   { id: 'documents', label: 'PDF Distribution Centre' },
 ];
 
-function EntryTable({ entries, getTeacherName }) {
+function EntryTable({ entries, getTeacherName, onEdit, isStaff }) {
   if (!entries.length) return <p className="p-5 text-sm text-muted-foreground">No timetable entries for this selection.</p>;
   return (
     <div className="cp-scroll-x">
@@ -41,16 +41,21 @@ function EntryTable({ entries, getTeacherName }) {
           <th className="px-3 py-2.5 text-left">Class</th>
           <th className="px-3 py-2.5 text-left">Subject</th>
           <th className="px-3 py-2.5 text-left">Room</th>
+          {isStaff && <th className="px-3 py-2.5 text-right">Review</th>}
         </tr></thead>
         <tbody>
           {entries.map((entry) => (
             <tr key={entry.id} className="border-t border-border/60">
               <td className="px-3 py-2.5">{entry.day_name}</td>
               <td className="px-3 py-2.5">{entry.period_number}{entry.start_time ? ` · ${fmtTime(entry.start_time)}–${fmtTime(entry.end_time)}` : ''}</td>
-              <td className="px-3 py-2.5">{getTeacherName(entry.member_id)}</td>
+              <td className="px-3 py-2.5">
+                <span>{getTeacherName(entry.member_id)}</span>
+                {entry.reassignment_required && <span className="mt-1 block text-[11px] font-semibold text-amber-700">{entry.staffing_issue_reason || 'Reassignment required'}</span>}
+              </td>
               <td className="px-3 py-2.5">{entry.class_name || '—'}</td>
               <td className="px-3 py-2.5">{entry.subject || '—'}</td>
               <td className="px-3 py-2.5">{entry.room || '—'}</td>
+              {isStaff && <td className="px-3 py-2.5 text-right">{entry.reassignment_required && <Button size="sm" variant="outline" onClick={() => onEdit(entry)}>Reassign</Button>}</td>}
             </tr>
           ))}
         </tbody>
@@ -114,7 +119,7 @@ export default function Timetable() {
       const [yearPage, teacherPage, entryPage] = await Promise.all([
         base44.entities.AcademicYear.filter({ school_id: schoolId }, { limit: 50, sort: '-name' }),
         isStaff
-          ? base44.entities.SchoolMember.filter({ school_id: schoolId, role: 'teacher', status: 'active' }, { limit: 500, sort: 'full_name' })
+          ? base44.entities.SchoolMember.filter({ school_id: schoolId, role: 'teacher', status: 'active', employment_status: { $ne: 'on_leave' } }, { limit: 500, sort: 'full_name' })
           : Promise.resolve({ items: [] }),
         base44.entities.TimetableEntry.filter({ school_id: schoolId, archived: false }, { limit: 2000 }),
       ]);
@@ -407,7 +412,7 @@ export default function Timetable() {
       ) : (
         <div className="cp-card overflow-hidden">
           {loading ? <p className="p-5 text-sm text-muted-foreground">Loading timetable…</p> : (
-            <EntryTable entries={filteredEntries} getTeacherName={getTeacherName} />
+            <EntryTable entries={filteredEntries} getTeacherName={getTeacherName} isStaff={isStaff} onEdit={(entry) => setEntryDialog({ entry })} />
           )}
         </div>
       )}
@@ -426,6 +431,8 @@ export default function Timetable() {
             onOpenChange={(open) => !open && setEntryDialog(null)}
             entry={entryDialog?.entry || null}
             memberId={targetId}
+            teachers={teachers}
+            isStaff={isStaff}
             defaultDay={entryDialog?.day}
             defaultPeriod={entryDialog?.period}
             academicYearId={academicYearId}

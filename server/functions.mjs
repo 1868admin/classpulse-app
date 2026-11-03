@@ -91,6 +91,200 @@ function deleteWhere(entity, predicate) {
   return matches.length;
 }
 
+function teacherEmploymentStatus(member) {
+  return member?.employment_status || 'active';
+}
+
+function isEligibleTeacher(member) {
+  return member?.role === 'teacher'
+    && member.status === 'active'
+    && teacherEmploymentStatus(member) === 'active';
+}
+
+function validatedEffectiveDate(value) {
+  const date = String(value || new Date().toISOString().slice(0, 10));
+  const parsed = new Date(`${date}T00:00:00Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(parsed.getTime())
+    || parsed.toISOString().slice(0, 10) !== date) {
+    throw Object.assign(new Error('Choose a valid effective date'), { status: 400 });
+  }
+  return date;
+}
+
+function activeClassLinks(schoolId, memberId) {
+  return records('ClassTeacher', (link) => link.school_id === schoolId
+    && link.member_id === memberId && link.is_active !== false);
+}
+
+function staffingImpact(member, effectiveDate = new Date().toISOString().slice(0, 10)) {
+  const schoolId = member.school_id;
+  const links = activeClassLinks(schoolId, member.id);
+  const classes = links.map((link) => {
+    const entity = link.class_type === 'subject' ? 'SubjectClass' : 'HomeroomClass';
+    const classRecord = getRecord(entity, link.class_id);
+    const studentCount = link.class_type === 'homeroom'
+      ? records('ClassMembership', (item) => item.school_id === schoolId
+        && item.class_type === 'homeroom' && item.class_id === link.class_id).length
+      : records('ClassMembership', (item) => item.school_id === schoolId
+        && item.class_type === 'subject' && item.class_id === link.class_id).length;
+    return {
+      class_type: link.class_type,
+      class_id: link.class_id,
+      class_name: classRecord?.name || link.class_name || 'Unknown class',
+      student_count: studentCount,
+    };
+  });
+  const currentYear = find('AcademicYear', (year) => year.school_id === schoolId && year.is_current);
+  const futureYearIds = new Set(records('AcademicYear', (year) => year.school_id === schoolId
+    && (year.is_current || !year.end_date || year.end_date >= effectiveDate)).map((year) => year.id));
+  const timetableEntries = records('TimetableEntry', (entry) => entry.school_id === schoolId
+    && entry.member_id === member.id && !entry.archived
+    && (entry.academic_year_id
+      ? futureYearIds.has(entry.academic_year_id)
+      : !currentYear || futureYearIds.has(currentYear.id)));
+  const today = new Date().toISOString().slice(0, 10);
+  const reviewFrom = effectiveDate > today ? effectiveDate : today;
+  const upcomingDuties = records('InvigilationAssignment', (assignment) => assignment.school_id === schoolId
+    && assignment.teacher_member_id === member.id
+    && ['draft', 'published'].includes(assignment.status)
+    && assignment.exam_date >= reviewFrom);
+  const exams = records('ExaminationTimetableEntry', (exam) => exam.school_id === schoolId
+    && exam.status === 'published' && exam.exam_date >= reviewFrom
+    && upcomingDuties.some((assignment) => assignment.examination_id === exam.id));
+  const affectedStudentIds = new Set(classes
+    .filter((item) => item.class_type === 'homeroom')
+    .flatMap((item) => records('ClassMembership', (membership) => membership.school_id === schoolId
+      && membership.class_type === 'homeroom' && membership.class_id === item.class_id)
+      .map((membership) => membership.student_id)));
+  return {
+    classes,
+    affected_student_count: affectedStudentIds.size,
+    timetable_entries: timetableEntries.map((entry) => ({
+      id: entry.id,
+      day_name: entry.day_name,
+      period_number: entry.period_number,
+      class_name: entry.class_name || '',
+      subject: entry.subject || '',
+      published: entry.published !== false,
+    })),
+    upcoming_examinations: exams.map((exam) => ({
+      id: exam.id,
+      exam_name: exam.exam_name,
+      exam_date: exam.exam_date,
+      room: exam.room,
+    })),
+    upcoming_invigilation_duties: upcomingDuties.map((assignment) => ({
+      id: assignment.id,
+      exam_name: assignment.exam_name,
+      exam_date: assignment.exam_date,
+      room: assignment.room,
+      status: assignment.status,
+    })),
+  };
+}
+
+function importList(value) {
+  const values = Array.isArray(value) ? value : String(value || '').split(/[;,]/);
+  return [...new Set(values.map((item) => String(item || '').trim()).filter(Boolean))];
+}
+
+function inspectStaffImport(schoolId, inputRows) {
+  if (!Array.isArray(inputRows) || !inputRows.length || inputRows.length > 500) {
+    throw Object.assign(new Error('Upload between 1 and 500 teacher rows'), { status: 400 });
+  }
+  const teachers = records('SchoolMember', (teacher) => teacher.school_id === schoolId && teacher.role === 'teacher');
+  const homerooms = records('HomeroomClass', (item) => item.school_id === schoolId && !item.archived);
+  const subjects = records('SubjectClass', (item) => item.school_id === schoolId && !item.archived);
+  const yearGroups = records('YearGroup', (item) => item.school_id === schoolId);
+  const seenNumbers = new Set();
+  const seenNames = new Set();
+  return inputRows.map((input, index) => {
+    const rowNumber = index + 2;
+    const fullName = String(input.full_name || '').trim().replace(/\s+/g, ' ');
+    const teacherNumber = normalizeTeacherNumber(input.teacher_number);
+    const statusInput = String(input.employment_status || input.status || '').trim();
+    const requestedStatus = statusInput.toLocaleLowerCase().replace(/[\s/-]+/g, '_');
+    const mappedStatus = ({
+      inactive: 'departed', inactive_departed: 'departed', departed: 'departed', left: 'departed',
+      active: 'active', on_leave: 'on_leave', leave: 'on_leave',
+    })[requestedStatus];
+    const specialisms = normalizeSubjectSpecialisms(input.subject_specialisms || input.specialisations || '');
+    const homeroomNames = importList(input.homeroom_classes || input.homeroom);
+    const subjectNames = importList(input.subject_classes || input.teaching_assignments);
+    const yearDean = String(input.year_dean || '').trim();
+    const errors = [];
+    if (!fullName) errors.push('Full name is required');
+    if (statusInput && !mappedStatus) errors.push('Employment status must be Active, On leave, or Departed');
+    const numberKey = teacherNumber.toLocaleLowerCase();
+    const nameKey = fullName.toLocaleLowerCase();
+    if (teacherNumber && seenNumbers.has(numberKey)) errors.push(`Teacher Number "${teacherNumber}" appears more than once in this file`);
+    if (fullName && seenNames.has(nameKey)) errors.push(`Teacher name "${fullName}" appears more than once in this file`);
+    if (teacherNumber) seenNumbers.add(numberKey);
+    if (fullName) seenNames.add(nameKey);
+
+    const numberMatches = teacherNumber
+      ? records('SchoolMember', (item) => item.school_id === schoolId
+        && String(item.teacher_number || '').trim().toLocaleLowerCase() === numberKey)
+      : [];
+    const nameMatches = teachers.filter((teacher) => String(teacher.full_name || '').trim().toLocaleLowerCase() === nameKey);
+    let existing = numberMatches.find((teacher) => teacher.role === 'teacher') || null;
+    let possibleDuplicate = false;
+    if (numberMatches.length && !existing) errors.push(`Teacher Number "${teacherNumber}" belongs to a non-teacher staff profile`);
+    if (!existing && !teacherNumber && nameMatches.length === 1) existing = nameMatches[0];
+    if (!existing && nameMatches.length) {
+      possibleDuplicate = true;
+      errors.push(`Possible duplicate teacher profile${nameMatches.length > 1 ? 's' : ''}; match by the existing Teacher Number`);
+    }
+    if (existing && teacherNumber && String(existing.teacher_number || '').trim().toLocaleLowerCase() !== numberKey) {
+      errors.push(`Existing profile has Teacher Number "${existing.teacher_number || 'none'}"; import cannot replace it`);
+    }
+    const employmentStatus = mappedStatus || (existing ? teacherEmploymentStatus(existing) : 'active');
+    if (existing && employmentStatus && employmentStatus !== teacherEmploymentStatus(existing)) {
+      if (teacherEmploymentStatus(existing) === 'departed' && employmentStatus !== 'active') {
+        errors.push('A departed teacher can only be reinstated to Active');
+      }
+    }
+
+    const startDate = String(input.employment_start_date || input.start_date || '').trim();
+    const effectiveDate = String(input.effective_date || input.departure_date || input.leave_date || input.return_date || '').trim();
+    for (const date of [startDate, effectiveDate].filter(Boolean)) {
+      try { validatedEffectiveDate(date); } catch { errors.push(`Invalid date "${date}"`); }
+    }
+    const matchedHomerooms = homeroomNames.map((name) => homerooms.find((item) => item.name.toLocaleLowerCase() === name.toLocaleLowerCase()));
+    const matchedSubjects = subjectNames.map((name) => subjects.find((item) => item.name.toLocaleLowerCase() === name.toLocaleLowerCase()));
+    matchedHomerooms.forEach((item, position) => { if (!item) errors.push(`Homeroom class "${homeroomNames[position]}" was not found`); });
+    matchedSubjects.forEach((item, position) => { if (!item) errors.push(`Subject class "${subjectNames[position]}" was not found`); });
+    const deanGroup = yearDean
+      ? yearGroups.find((item) => item.name.toLocaleLowerCase() === yearDean.toLocaleLowerCase())
+      : null;
+    if (yearDean && !deanGroup) errors.push(`Year group "${yearDean}" was not found`);
+    if (employmentStatus !== 'active' && (homeroomNames.length || subjectNames.length || yearDean)) {
+      errors.push('Teaching and Year Dean assignments require Active employment status');
+    }
+
+    return {
+      row: rowNumber,
+      full_name: fullName,
+      teacher_number: teacherNumber,
+      employment_status: employmentStatus || 'active',
+      employment_start_date: startDate,
+      effective_date: effectiveDate,
+      employment_reason: String(input.employment_reason || input.notes || '').trim().slice(0, 500),
+      subject_specialisms: specialisms,
+      homeroom_classes: matchedHomerooms.filter(Boolean).map((item) => ({ id: item.id, name: item.name })),
+      subject_classes: matchedSubjects.filter(Boolean).map((item) => ({ id: item.id, name: item.name })),
+      year_group: deanGroup ? { id: deanGroup.id, name: deanGroup.name } : null,
+      existing_member_id: existing?.id || '',
+      operation: existing ? 'update' : 'create',
+      possible_duplicate: possibleDuplicate,
+      errors,
+      impact: existing && employmentStatus !== teacherEmploymentStatus(existing)
+        ? staffingImpact(existing)
+        : null,
+    };
+  });
+}
+
 function getActorSchool(actor) {
   return actor.member?.school_id || actor.user.school_id || '';
 }
@@ -223,6 +417,334 @@ function manageStaff(actor, body) {
   requireStaff(member);
   const schoolId = member.school_id;
 
+  if (body.action === 'import_preview' || body.action === 'import_apply') {
+    const previewRows = inspectStaffImport(schoolId, body.rows);
+    const errors = previewRows.flatMap((row) => row.errors.map((message) => ({ row: row.row, message })));
+    if (body.action === 'import_preview') {
+      return {
+        rows: previewRows,
+        summary: {
+          total: previewRows.length,
+          create: previewRows.filter((row) => row.operation === 'create' && !row.errors.length).length,
+          update: previewRows.filter((row) => row.operation === 'update' && !row.errors.length).length,
+          invalid: previewRows.filter((row) => row.errors.length).length,
+        },
+      };
+    }
+    if (errors.length) {
+      throw Object.assign(new Error('Resolve the import preview errors before applying the staffing changes'), {
+        status: 400,
+        details: { rows: previewRows },
+      });
+    }
+
+    return withTransaction(() => {
+      let created = 0;
+      let updated = 0;
+      let assignmentsAdded = 0;
+      for (const row of previewRows) {
+        const existing = row.existing_member_id ? getRecord('SchoolMember', row.existing_member_id) : null;
+        if (existing && (existing.school_id !== schoolId || existing.role !== 'teacher')) {
+          throw Object.assign(new Error(`Teacher on row ${row.row} is no longer available`), { status: 409 });
+        }
+        assertUniqueTeacherNumber(schoolId, row.teacher_number, existing?.id || '');
+        let teacher = existing;
+        if (!teacher) {
+          teacher = createRecord('SchoolMember', {
+            school_id: schoolId,
+            user_id: '',
+            user_email: '',
+            full_name: row.full_name,
+            role: 'teacher',
+            status: row.employment_status === 'departed' ? 'inactive' : 'active',
+            employment_status: row.employment_status,
+            employment_start_date: row.employment_start_date,
+            employment_reason: row.employment_reason,
+            employment_history: [],
+            teacher_number: row.teacher_number,
+            subject_specialisms: row.subject_specialisms,
+            username: '',
+            phone: '',
+          });
+          created += 1;
+        } else {
+          const previousStatus = teacherEmploymentStatus(teacher);
+          const employmentChanged = previousStatus !== row.employment_status;
+          const effectiveDate = validatedEffectiveDate(row.effective_date || new Date().toISOString().slice(0, 10));
+          const impact = employmentChanged ? staffingImpact(teacher, effectiveDate) : null;
+          const history = Array.isArray(teacher.employment_history) ? [...teacher.employment_history] : [];
+          if (employmentChanged) {
+            history.push({
+              from_status: previousStatus,
+              to_status: row.employment_status,
+              effective_date: effectiveDate,
+              reason: row.employment_reason,
+              changed_at: new Date().toISOString(),
+            });
+          }
+          teacher = updateRecord('SchoolMember', teacher.id, {
+            full_name: row.full_name,
+            employment_status: row.employment_status,
+            employment_start_date: row.employment_start_date || teacher.employment_start_date || '',
+            employment_reason: row.employment_reason || teacher.employment_reason || '',
+            employment_history: history,
+            subject_specialisms: row.subject_specialisms,
+            ...(row.employment_status === 'departed' ? { status: 'inactive', departure_date: effectiveDate } : {}),
+            ...(row.employment_status === 'on_leave' && employmentChanged ? { leave_date: effectiveDate } : {}),
+            ...(previousStatus === 'departed' && row.employment_status === 'active' ? { status: 'active', return_date: effectiveDate } : {}),
+          });
+          if (employmentChanged && impact && row.employment_status !== 'active') {
+            for (const link of activeClassLinks(schoolId, teacher.id)) {
+              updateRecord('ClassTeacher', link.id, {
+                is_active: false, ended_at: effectiveDate, end_reason: `Employment status changed to ${row.employment_status}`,
+              });
+            }
+            for (const entry of impact.timetable_entries) {
+              updateRecord('TimetableEntry', entry.id, {
+                reassignment_required: true,
+                staffing_issue_reason: `Teacher is ${row.employment_status === 'departed' ? 'departed' : 'on leave'}`,
+              });
+            }
+            for (const assignment of impact.upcoming_invigilation_duties) {
+              updateRecord('InvigilationAssignment', assignment.id, {
+                reassignment_required: true,
+                staffing_issue_reason: `Teacher is ${row.employment_status === 'departed' ? 'departed' : 'on leave'}`,
+              });
+            }
+          }
+          if (employmentChanged && teacher.user_id) {
+            if (row.employment_status === 'departed') {
+              updateUser(teacher.user_id, { school_id: '', school_role: '', member_id: '' });
+              setAccountActive(teacher.user_id, false);
+            } else if (previousStatus === 'departed' && row.employment_status === 'active') {
+              updateUser(teacher.user_id, { school_id, school_role: 'teacher', member_id: teacher.id });
+              setAccountActive(teacher.user_id, true);
+            }
+          }
+          updateWhere('ClassTeacher', (link) => link.school_id === schoolId && link.member_id === teacher.id, { member_name: row.full_name });
+          updated += 1;
+        }
+
+        if (isEligibleTeacher(teacher)) {
+          for (const classInfo of [...row.homeroom_classes.map((item) => ({ ...item, type: 'homeroom' })),
+            ...row.subject_classes.map((item) => ({ ...item, type: 'subject' }))]) {
+            const activeLink = records('ClassTeacher', (link) => link.school_id === schoolId
+              && link.class_type === classInfo.type && link.class_id === classInfo.id
+              && link.member_id === teacher.id && link.is_active !== false)[0];
+            if (activeLink) continue;
+            createRecord('ClassTeacher', {
+              school_id: schoolId,
+              class_type: classInfo.type,
+              class_id: classInfo.id,
+              class_name: classInfo.name,
+              member_id: teacher.id,
+              user_id: teacher.user_id || '',
+              member_name: teacher.full_name,
+              is_primary: false,
+              is_active: true,
+              assigned_at: new Date().toISOString().slice(0, 10),
+            });
+            assignmentsAdded += 1;
+          }
+          if (row.year_group) {
+            updateRecord('YearGroup', row.year_group.id, { dean_member_id: teacher.id, dean_name: teacher.full_name });
+          }
+        }
+        audit({ ...actor, member }, {
+          action: existing ? 'staff.import_updated' : 'staff.import_created',
+          entityType: 'SchoolMember',
+          entityId: teacher.id,
+          summary: `${existing ? 'Updated' : 'Created'} ${teacher.full_name} from staffing import`,
+        });
+      }
+      audit({ ...actor, member }, {
+        action: 'staff.import_completed',
+        entityType: 'SchoolMember',
+        summary: `Imported ${created} new and updated ${updated} teacher profile(s); added ${assignmentsAdded} assignment(s)`,
+      });
+      return { created, updated, assignments_added: assignmentsAdded };
+    });
+  }
+
+  if (body.action === 'employment_preview' || body.action === 'employment_change') {
+    const target = getRecord('SchoolMember', body.member_id);
+    if (!target || target.school_id !== schoolId || target.role !== 'teacher') {
+      throw Object.assign(new Error('Teacher not found'), { status: 404 });
+    }
+    const nextStatus = String(body.employment_status || '');
+    if (!['active', 'on_leave', 'departed'].includes(nextStatus)) {
+      throw Object.assign(new Error('Choose active, on leave, or departed'), { status: 400 });
+    }
+    const effectiveDate = validatedEffectiveDate(body.effective_date);
+    const previousStatus = teacherEmploymentStatus(target);
+    if (previousStatus === nextStatus) {
+      throw Object.assign(new Error('The teacher already has that employment status'), { status: 409 });
+    }
+    if (previousStatus === 'departed' && nextStatus !== 'active') {
+      throw Object.assign(new Error('A departed teacher must be reinstated before another status change'), { status: 409 });
+    }
+    const impact = staffingImpact(target, effectiveDate);
+    if (body.action === 'employment_preview') return { teacher: target, previous_status: previousStatus, next_status: nextStatus, effective_date: effectiveDate, impact };
+
+    return withTransaction(() => {
+      const history = Array.isArray(target.employment_history) ? [...target.employment_history] : [];
+      history.push({
+        from_status: previousStatus,
+        to_status: nextStatus,
+        effective_date: effectiveDate,
+        reason: String(body.reason || '').trim().slice(0, 500),
+        changed_at: new Date().toISOString(),
+      });
+      const patch = {
+        employment_status: nextStatus,
+        employment_reason: String(body.reason || '').trim().slice(0, 500),
+        employment_history: history,
+        ...(nextStatus === 'on_leave' ? { leave_date: effectiveDate } : {}),
+        ...(nextStatus === 'departed' ? { departure_date: effectiveDate } : {}),
+        ...(previousStatus !== 'active' && nextStatus === 'active' ? { return_date: effectiveDate } : {}),
+        ...(nextStatus === 'departed' ? { status: 'inactive' } : {}),
+        ...(previousStatus === 'departed' && nextStatus === 'active' ? { status: 'active' } : {}),
+      };
+      const updated = updateRecord('SchoolMember', target.id, patch);
+      if (nextStatus !== 'active') {
+        for (const link of activeClassLinks(schoolId, target.id)) {
+          updateRecord('ClassTeacher', link.id, {
+            is_active: false,
+            ended_at: effectiveDate,
+            end_reason: `Employment status changed to ${nextStatus}`,
+          });
+        }
+        for (const entry of impact.timetable_entries) {
+          updateRecord('TimetableEntry', entry.id, {
+            reassignment_required: true,
+            staffing_issue_reason: `Teacher is ${nextStatus === 'departed' ? 'departed' : 'on leave'}`,
+          });
+        }
+        for (const assignment of impact.upcoming_invigilation_duties) {
+          updateRecord('InvigilationAssignment', assignment.id, {
+            reassignment_required: true,
+            staffing_issue_reason: `Teacher is ${nextStatus === 'departed' ? 'departed' : 'on leave'}`,
+          });
+        }
+      } else {
+        for (const link of records('ClassTeacher', (item) => item.school_id === schoolId
+          && item.member_id === target.id && item.is_active !== false)) {
+          updateRecord('ClassTeacher', link.id, { member_name: target.full_name });
+        }
+      }
+      if (target.user_id) {
+        if (nextStatus === 'departed') {
+          updateUser(target.user_id, { school_id: '', school_role: '', member_id: '' });
+          setAccountActive(target.user_id, false);
+        } else if (previousStatus === 'departed' && nextStatus === 'active') {
+          updateUser(target.user_id, {
+            full_name: target.full_name,
+            school_id: schoolId,
+            school_role: target.role,
+            member_id: target.id,
+          });
+          setAccountActive(target.user_id, true);
+        }
+      }
+      audit({ ...actor, member }, {
+        action: `staff.employment_${nextStatus}`,
+        entityType: 'SchoolMember',
+        entityId: target.id,
+        summary: `${target.full_name}: ${previousStatus} -> ${nextStatus} effective ${effectiveDate}; ${impact.classes.length} class(es), ${impact.timetable_entries.length} lesson(s), ${impact.upcoming_invigilation_duties.length} future duty/duties affected`,
+      });
+      return { member: updated, impact };
+    });
+  }
+
+  if (body.action === 'assignment_preview' || body.action === 'assignment_apply') {
+    const changes = Array.isArray(body.changes) ? body.changes : [];
+    if (!changes.length || changes.length > 200) {
+      throw Object.assign(new Error('Provide between 1 and 200 assignment changes'), { status: 400 });
+    }
+    const normalized = changes.map((change, index) => {
+      const action = String(change.action || '');
+      const classType = String(change.class_type || '');
+      const classId = String(change.class_id || '');
+      if (!['assign', 'remove'].includes(action) || !['homeroom', 'subject'].includes(classType) || !classId) {
+        throw Object.assign(new Error(`Assignment change ${index + 1} is incomplete`), { status: 400 });
+      }
+      const classEntity = classType === 'subject' ? 'SubjectClass' : 'HomeroomClass';
+      const classRecord = getRecord(classEntity, classId);
+      if (!classRecord || classRecord.school_id !== schoolId || classRecord.archived) {
+        throw Object.assign(new Error(`Assignment change ${index + 1} references an unavailable class`), { status: 400 });
+      }
+      const memberIds = [...new Set((Array.isArray(change.member_ids) ? change.member_ids : [change.member_id])
+        .map((id) => String(id || '').trim()).filter(Boolean))];
+      if (!memberIds.length) throw Object.assign(new Error(`Assignment change ${index + 1} requires at least one teacher`), { status: 400 });
+      const teachers = memberIds.map((id) => getRecord('SchoolMember', id));
+      if (teachers.some((teacher) => !teacher || teacher.school_id !== schoolId || teacher.role !== 'teacher'
+        || (action === 'assign' && !isEligibleTeacher(teacher)))) {
+        throw Object.assign(new Error(`Assignment change ${index + 1} includes an ineligible teacher`), { status: 400 });
+      }
+      return { action, class_type: classType, class_id: classId, class_name: classRecord.name, member_ids: memberIds };
+    });
+    const affectedClassIds = new Set(normalized.map((change) => change.class_id));
+    const affectedTeacherIds = new Set(normalized.flatMap((change) => change.member_ids));
+    const timetableReviews = records('TimetableEntry', (entry) => entry.school_id === schoolId && !entry.archived
+      && (affectedTeacherIds.has(entry.member_id)
+        || affectedClassIds.has(entry.subject_class_id) || affectedClassIds.has(entry.homeroom_id)));
+    const invigilationReviews = records('InvigilationAssignment', (assignment) => assignment.school_id === schoolId
+      && affectedTeacherIds.has(assignment.teacher_member_id)
+      && ['draft', 'published'].includes(assignment.status));
+    if (body.action === 'assignment_preview') {
+      return {
+        changes: normalized,
+        affected_timetable_entries: timetableReviews.map((entry) => ({
+          id: entry.id, day_name: entry.day_name, period_number: entry.period_number, class_name: entry.class_name || '', subject: entry.subject || '',
+        })),
+        affected_invigilation_duties: invigilationReviews.map((assignment) => ({
+          id: assignment.id, exam_name: assignment.exam_name, exam_date: assignment.exam_date, room: assignment.room,
+        })),
+      };
+    }
+
+    return withTransaction(() => {
+      let assigned = 0;
+      let removed = 0;
+      const now = new Date().toISOString();
+      for (const change of normalized) {
+        for (const teacherId of change.member_ids) {
+          const current = records('ClassTeacher', (link) => link.school_id === schoolId
+            && link.class_type === change.class_type && link.class_id === change.class_id
+            && link.member_id === teacherId && link.is_active !== false);
+          if (change.action === 'remove') {
+            for (const link of current) {
+              updateRecord('ClassTeacher', link.id, { is_active: false, ended_at: now.slice(0, 10), end_reason: 'Assignment removed by administrator' });
+              removed += 1;
+            }
+            continue;
+          }
+          if (current.length) continue;
+          const teacher = getRecord('SchoolMember', teacherId);
+          createRecord('ClassTeacher', {
+            school_id: schoolId,
+            class_type: change.class_type,
+            class_id: change.class_id,
+            class_name: change.class_name,
+            member_id: teacher.id,
+            user_id: teacher.user_id || '',
+            member_name: teacher.full_name || '',
+            is_primary: false,
+            is_active: true,
+            assigned_at: now.slice(0, 10),
+          });
+          assigned += 1;
+        }
+      }
+      audit({ ...actor, member }, {
+        action: 'staff.assignments_updated',
+        entityType: 'ClassTeacher',
+        summary: `Added ${assigned} and removed ${removed} teacher assignment(s)`,
+      });
+      return { assigned, removed, affected_timetable_entries: timetableReviews.length, affected_invigilation_duties: invigilationReviews.length };
+    });
+  }
+
   if (body.action === 'invite') {
     const email = String(body.user_email || '').trim().toLowerCase();
     const fullName = String(body.full_name || '').trim().replace(/\s+/g, ' ');
@@ -230,6 +752,7 @@ function manageStaff(actor, body) {
     const username = String(body.username || email.split('@')[0] || '').trim();
     const teacherNumber = normalizeTeacherNumber(body.teacher_number);
     const subjectSpecialisms = normalizeSubjectSpecialisms(body.subject_specialisms);
+    const createAccount = body.create_account !== false;
     assertUniqueTeacherNumber(schoolId, teacherNumber);
     if (!fullName) {
       throw Object.assign(new Error("Enter the staff member's full name"), { status: 400 });
@@ -239,6 +762,12 @@ function manageStaff(actor, body) {
     }
     if (!['teacher', 'it_admin', 'school_admin'].includes(role)) {
       throw Object.assign(new Error('Unknown staff role'), { status: 400 });
+    }
+    if (!createAccount && role !== 'teacher') {
+      throw Object.assign(new Error('Only teacher profiles can be created without a login account'), { status: 400 });
+    }
+    if (!createAccount && body.password) {
+      throw Object.assign(new Error('A password cannot be set until a login account is created'), { status: 400 });
     }
     if (role === 'school_admin' && !isSchoolAdmin(member)) {
       throw Object.assign(new Error('Only a school administrator can grant that role'), { status: 403 });
@@ -252,37 +781,43 @@ function manageStaff(actor, body) {
     }
 
     return withTransaction(() => {
-      const user = createRecord('User', {
+      const user = createAccount ? createRecord('User', {
         email,
         full_name: fullName,
         role: 'user',
         school_id: schoolId,
         school_role: role,
-      });
-      const accountUsername = hasPassword
-        ? (createLocalAccount({ username, password: body.password, userId: user.id, email }), username)
-        : ensureLocalAccount({ userId: user.id, fullName, email, preferredUsername: body.username });
+      }) : null;
+      const accountUsername = user
+        ? hasPassword
+          ? (createLocalAccount({ username, password: body.password, userId: user.id, email }), username)
+          : ensureLocalAccount({ userId: user.id, fullName, email, preferredUsername: body.username })
+        : '';
       const created = createRecord('SchoolMember', {
         school_id: schoolId,
-        user_id: user.id,
+        user_id: user?.id || '',
         user_email: email,
         full_name: fullName,
         role,
         status: 'active',
+        employment_status: role === 'teacher' ? 'active' : undefined,
+        employment_start_date: String(body.employment_start_date || ''),
+        employment_reason: String(body.employment_reason || '').trim().slice(0, 500),
+        employment_history: [],
         password_set: hasPassword,
         username: accountUsername,
         phone: body.phone || '',
         teacher_number: teacherNumber,
         subject_specialisms: subjectSpecialisms,
       });
-      updateUser(user.id, { member_id: created.id });
+      if (user) updateUser(user.id, { member_id: created.id });
       audit({ ...actor, member }, {
         action: 'staff.created',
         entityType: 'SchoolMember',
         entityId: created.id,
-        summary: `Created local account for ${fullName} (${role})`,
+        summary: `${createAccount ? 'Created local account' : 'Created teacher profile'} for ${fullName} (${role})`,
       });
-      return { member: created, invited: false, local_account_created: true };
+      return { member: created, invited: false, local_account_created: createAccount };
     });
   }
 
@@ -296,6 +831,9 @@ function manageStaff(actor, body) {
     }
     if (target.id === member.id && body.role && body.role !== target.role) {
       throw Object.assign(new Error('You cannot change your own role'), { status: 400 });
+    }
+    if (target.role === 'teacher' && target.employment_status === 'departed' && body.status === 'active') {
+      throw Object.assign(new Error('Use Reinstate Teacher to restore a departed teacher'), { status: 409 });
     }
     if (body.role === 'school_admin' && !isSchoolAdmin(member)) {
       throw Object.assign(new Error('Only a school administrator can grant that role'), { status: 403 });
@@ -322,17 +860,41 @@ function manageStaff(actor, body) {
     return withTransaction(() => {
       let username = patch.username;
       const account = target.user_id ? getAccountForUser(target.user_id) : null;
-      if (body.password || (username && username !== account?.username)) {
-        if (account) {
-          username = updateAccountCredentials({ userId: target.user_id, username, password: body.password });
+      let userId = target.user_id || '';
+      let createdAccount = false;
+      if (!userId && body.create_account === true) {
+        if (target.role !== 'teacher' || target.employment_status === 'departed') {
+          throw Object.assign(new Error('This profile cannot receive a login account in its current state'), { status: 400 });
+        }
+        const user = createRecord('User', {
+          email: target.user_email || '',
+          full_name: fullName,
+          role: 'user',
+          school_id: schoolId,
+          school_role: patch.role,
+        });
+        userId = user.id;
+        if (body.password) {
+          username = createLocalAccount({ username, password: body.password, userId, email: target.user_email || '' });
         } else {
-          if (!target.user_id || typeof body.password !== 'string' || body.password.length < 8) {
+          username = ensureLocalAccount({ userId, fullName, email: target.user_email || '', preferredUsername: username });
+        }
+        updateUser(userId, { member_id: target.id });
+        patch.user_id = userId;
+        patch.password_set = Boolean(body.password);
+        createdAccount = true;
+      }
+      if (userId && !createdAccount && (body.password || (username && username !== account?.username))) {
+        if (account) {
+          username = updateAccountCredentials({ userId, username, password: body.password });
+        } else {
+          if (typeof body.password !== 'string' || body.password.length < 8) {
             throw Object.assign(new Error('This imported account needs a local password of at least 8 characters'), { status: 400 });
           }
           createLocalAccount({
             username,
             password: body.password,
-            userId: target.user_id,
+            userId,
             email: target.user_email,
           });
           patch.status = 'active';
@@ -341,14 +903,14 @@ function manageStaff(actor, body) {
       if (body.password) patch.password_set = true;
       patch.username = username;
       const updated = updateRecord('SchoolMember', target.id, patch);
-      if (target.user_id) {
-        updateUser(target.user_id, {
+      if (userId) {
+        updateUser(userId, {
           full_name: fullName,
           school_role: patch.role,
           ...(patch.status === 'inactive' ? { school_id: '', member_id: '' } : { school_id: schoolId, member_id: target.id }),
         });
-        if (patch.status === 'inactive') setAccountActive(target.user_id, false);
-        else if (account) setAccountActive(target.user_id, true);
+        if (patch.status === 'inactive') setAccountActive(userId, false);
+        else if (account || patch.user_id) setAccountActive(userId, true);
       }
       if (fullName !== target.full_name) {
         updateWhere('ClassTeacher', (item) => item.school_id === schoolId && item.member_id === target.id, { member_name: fullName });
@@ -409,6 +971,9 @@ function manageStaff(actor, body) {
     }
     if (target.id === member.id) {
       throw Object.assign(new Error('You cannot remove your own account'), { status: 400 });
+    }
+    if (target.role === 'teacher') {
+      throw Object.assign(new Error('Teacher profiles are retained. Use Mark Teacher as Departed to end employment and restrict account access.'), { status: 409 });
     }
     return withTransaction(() => {
       const links = deleteWhere('ClassTeacher', (item) => item.school_id === schoolId && item.member_id === target.id);
@@ -521,8 +1086,8 @@ function saveTimetableEntries(actor, body) {
   const target = body.member_id && isStaff(member)
     ? getRecord('SchoolMember', body.member_id)
     : member;
-  if (!target || target.school_id !== schoolId) {
-    throw Object.assign(new Error('Teacher not found'), { status: 404 });
+  if (!target || target.school_id !== schoolId || !isEligibleTeacher(target)) {
+    throw Object.assign(new Error('Choose an active teacher belonging to this school.'), { status: 404 });
   }
   const currentAcademicYear = find('AcademicYear', (year) => year.school_id === schoolId && year.is_current);
   const academicYear = body.academic_year_id
@@ -615,7 +1180,7 @@ function approveGeneratedTimetable(actor, body) {
   }
   const entries = body.entries.map((entry) => {
     const teacher = getRecord('SchoolMember', entry.member_id);
-    if (!teacher || teacher.school_id !== schoolId || teacher.role !== 'teacher' || teacher.status === 'inactive') {
+    if (!isEligibleTeacher(teacher) || teacher.school_id !== schoolId) {
       throw Object.assign(new Error('Every proposed lesson must have an active teacher from this school.'), { status: 400 });
     }
     const subjectClass = getRecord('SubjectClass', entry.subject_class_id);
@@ -918,7 +1483,8 @@ function submitAttendance(actor, body) {
     throw Object.assign(new Error('Class not found'), { status: 404 });
   }
   if (!isStaff(member) && !records('ClassTeacher', (link) =>
-    link.school_id === schoolId && link.class_id === class_id && link.member_id === member.id).length) {
+    link.school_id === schoolId && link.class_id === class_id && link.member_id === member.id
+    && link.is_active !== false).length) {
     throw Object.assign(new Error('You are not assigned to that class'), { status: 403 });
   }
   const classMemberships = records('ClassMembership', (row) =>
@@ -1124,7 +1690,8 @@ function bulkStudentAction(actor, body) {
       if (!subjectClass || subjectClass.school_id !== schoolId) {
         throw Object.assign(new Error('Class not found'), { status: 404 });
       }
-      if (!isStaff(member) && !records('ClassTeacher', (link) => link.school_id === schoolId && link.class_id === classId && link.member_id === member.id).length) {
+      if (!isStaff(member) && !records('ClassTeacher', (link) => link.school_id === schoolId
+        && link.class_id === classId && link.member_id === member.id && link.is_active !== false).length) {
         throw Object.assign(new Error('You are not a teacher of that class'), { status: 403 });
       }
       if (action === 'add_to_class') {
@@ -1399,7 +1966,8 @@ function saveClass(actor, body) {
     throw Object.assign(new Error('Only school administrators can manage homeroom classes'), { status: 403 });
   }
   if (existing && !staff && !records('ClassTeacher', (link) =>
-    link.school_id === schoolId && link.class_id === existing.id && link.member_id === member.id).length) {
+    link.school_id === schoolId && link.class_id === existing.id && link.member_id === member.id
+    && link.is_active !== false).length) {
     throw Object.assign(new Error('You are not authorised to edit this class'), { status: 403 });
   }
 
@@ -1426,7 +1994,7 @@ function saveClass(actor, body) {
   let teacherIds = [...new Set((Array.isArray(body.teacher_ids) ? body.teacher_ids : []).filter(Boolean))];
   if (!existing && !staff && !teacherIds.includes(member.id)) teacherIds.push(member.id);
   const teachers = teacherIds.map((id) => getRecord('SchoolMember', id));
-  if (teachers.some((teacher) => !teacher || teacher.school_id !== schoolId || teacher.status === 'inactive')) {
+  if (teachers.some((teacher) => !isEligibleTeacher(teacher) || teacher.school_id !== schoolId)) {
     throw Object.assign(new Error('One or more selected teachers are unavailable'), { status: 400 });
   }
   const primaryId = teacherIds.includes(body.primary_id) ? body.primary_id : teacherIds[0] || '';
@@ -1451,11 +2019,18 @@ function saveClass(actor, body) {
       : createRecord(entity, { ...data, archived: false, student_count: 0 });
 
     const links = records('ClassTeacher', (link) => link.school_id === schoolId && link.class_id === saved.id);
-    for (const link of links) {
-      if (!teacherIds.includes(link.member_id)) deleteRecord('ClassTeacher', link.id);
+    const activeLinks = links.filter((link) => link.is_active !== false);
+    for (const link of activeLinks) {
+      if (!teacherIds.includes(link.member_id)) {
+        updateRecord('ClassTeacher', link.id, {
+          is_active: false,
+          ended_at: new Date().toISOString().slice(0, 10),
+          end_reason: 'Assignment removed by administrator',
+        });
+      }
     }
     for (const teacher of teachers) {
-      const found = links.find((link) => link.member_id === teacher.id);
+      const found = activeLinks.find((link) => link.member_id === teacher.id);
       if (found) {
         updateRecord('ClassTeacher', found.id, {
           is_primary: teacher.id === primaryId,
@@ -1472,6 +2047,8 @@ function saveClass(actor, body) {
           user_id: teacher.user_id || '',
           member_name: teacher.full_name || '',
           is_primary: teacher.id === primaryId,
+          is_active: true,
+          assigned_at: new Date().toISOString().slice(0, 10),
         });
       }
     }
@@ -1497,7 +2074,8 @@ function removeClassStudent(actor, body) {
   }
   const classEntity = membership.class_type === 'subject' ? 'SubjectClass' : 'HomeroomClass';
   const authorized = isStaff(member) || records('ClassTeacher', (link) =>
-    link.school_id === schoolId && link.class_id === membership.class_id && link.member_id === member.id).length > 0;
+    link.school_id === schoolId && link.class_id === membership.class_id && link.member_id === member.id
+    && link.is_active !== false).length > 0;
   if (!authorized) throw Object.assign(new Error('You are not authorised to manage this class'), { status: 403 });
   return withTransaction(() => {
     deleteRecord('ClassMembership', membership.id);
@@ -1523,7 +2101,8 @@ function assignStudents(actor, body) {
     throw Object.assign(new Error('Class not found'), { status: 404 });
   }
   const authorized = isStaff(member) || records('ClassTeacher', (link) =>
-    link.school_id === schoolId && link.class_id === classId && link.member_id === member.id).length > 0;
+    link.school_id === schoolId && link.class_id === classId && link.member_id === member.id
+    && link.is_active !== false).length > 0;
   if (!authorized) throw Object.assign(new Error('You are not authorised to manage this class'), { status: 403 });
   const students = studentIds.map((id) => getRecord('Student', id));
   if (students.some((student) => !student || student.school_id !== schoolId || student.archived)) {
@@ -1585,7 +2164,8 @@ function importStudents(actor, body) {
       throw Object.assign(new Error('Import class not found'), { status: 404 });
     }
     if (!isStaff(member) && !records('ClassTeacher', (link) =>
-      link.school_id === schoolId && link.class_id === targetClassId && link.member_id === member.id).length) {
+      link.school_id === schoolId && link.class_id === targetClassId && link.member_id === member.id
+      && link.is_active !== false).length) {
       throw Object.assign(new Error('You are not authorised to import students into this class'), { status: 403 });
     }
   } else {
@@ -1803,7 +2383,7 @@ function promoteStudents(actor, body) {
     }
     if (!isStaff(member) && !records('ClassTeacher', (link) =>
       link.school_id === schoolId && link.member_id === member.id
-      && link.class_id === sourceClassId && link.class_type === 'subject').length) {
+      && link.class_id === sourceClassId && link.class_type === 'subject' && link.is_active !== false).length) {
       throw Object.assign(new Error('You are not authorised to promote this subject class'), { status: 403 });
     }
     const sourceMembers = new Set(records('ClassMembership', (row) =>
@@ -1920,7 +2500,8 @@ function promoteStudents(actor, body) {
   }
   if (!isStaff(member)) {
     const allowedClasses = new Set(records('ClassTeacher', (link) =>
-      link.school_id === schoolId && link.member_id === member.id && link.class_type === 'homeroom').map((link) => link.class_id));
+      link.school_id === schoolId && link.member_id === member.id && link.class_type === 'homeroom'
+      && link.is_active !== false).map((link) => link.class_id));
     if (sourceClassId ? !allowedClasses.has(sourceClassId)
       : selected.some((student) => !allowedClasses.has(student.homeroom_class_id))) {
       throw Object.assign(new Error('You can only promote students from your assigned homeroom classes'), { status: 403 });

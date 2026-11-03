@@ -13,6 +13,12 @@
     },
     "next_level": {
       "type": "number"
+    },
+    "dean_member_id": {
+      "type": "string"
+    },
+    "dean_name": {
+      "type": "string"
     }
   },
   "required": [

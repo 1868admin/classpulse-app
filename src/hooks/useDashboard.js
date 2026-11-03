@@ -223,7 +223,7 @@ export function useTeacherDashboard(schoolId, memberId) {
     if (!schoolId || !memberId) return;
     setData((current) => ({ ...current, loading: true }));
     const [links, entries, sessions, calendar, supervision] = await Promise.all([
-      base44.entities.ClassTeacher.filter({ school_id: schoolId, member_id: memberId }, { limit: 200 }),
+      base44.entities.ClassTeacher.filter({ school_id: schoolId, member_id: memberId, is_active: { $ne: false } }, { limit: 200 }),
       base44.entities.TimetableEntry.filter({ school_id: schoolId, member_id: memberId, archived: false }, { limit: 200 }),
       base44.entities.AttendanceSession.filter({ school_id: schoolId, date: today, member_id: memberId }, { limit: 100 }),
       base44.entities.CalendarDate.filter({ school_id: schoolId, date: today }, { limit: 1 }),

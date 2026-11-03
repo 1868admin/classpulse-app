@@ -77,7 +77,7 @@ export default function InvigilationManagement({
             { limit: 2000, sort: ['exam_date', 'start_time'] },
           ),
           base44.entities.SchoolMember.filter(
-            { school_id: schoolId, role: 'teacher', status: 'active' },
+            { school_id: schoolId, role: 'teacher', status: 'active', employment_status: { $ne: 'on_leave' } },
             { limit: 500, sort: 'full_name' },
           ),
           base44.entities.InvigilationRequirement.filter({ school_id: schoolId }, { limit: 2000 }),
@@ -231,7 +231,10 @@ export default function InvigilationManagement({
         </td>
       )}
       <td className="whitespace-nowrap px-3 py-2.5">{assignment.exam_date} · {assignment.start_time}–{assignment.end_time}</td>
-      <td className="px-3 py-2.5 font-medium">{assignment.exam_name}</td>
+      <td className="px-3 py-2.5 font-medium">
+        {assignment.exam_name}
+        {assignment.reassignment_required && <span className="mt-1 block text-[11px] font-semibold text-amber-700">{assignment.staffing_issue_reason || 'Reassignment required'}</span>}
+      </td>
       <td className="px-3 py-2.5">{assignment.subject}</td>
       <td className="px-3 py-2.5">{assignment.room}</td>
       <td className="px-3 py-2.5">

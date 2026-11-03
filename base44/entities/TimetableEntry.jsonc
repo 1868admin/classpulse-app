@@ -51,6 +51,13 @@
     "archived": {
       "type": "boolean",
       "default": false
+    },
+    "reassignment_required": {
+      "type": "boolean",
+      "default": false
+    },
+    "staffing_issue_reason": {
+      "type": "string"
     }
   },
   "required": [

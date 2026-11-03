@@ -39,6 +39,15 @@
 - Added school-scoped, case-insensitive unique Teacher Numbers while retaining
   permanent membership IDs. Teacher subject specialisms are normalized as
   individual values, with existing comma-separated records kept readable.
+- Added a teacher employment lifecycle with separate employment and account
+  states, optional login accounts, retained employment history, impact preview,
+  and profile-preserving reinstatement. Departures deactivate class links
+  without deleting history and flag affected timetable and invigilation records
+  for reassignment. Active teacher eligibility is enforced across class,
+  timetable, generation, and invigilation workflows.
+- Added multi-class assignment preview/apply and CSV/XLS/XLSX staff import
+  preview with Teacher Number matching, duplicate and class/year validation,
+  and atomic application. Existing teacher IDs and Teacher Numbers are retained.
 - Added academic-year-linked teacher unavailability by timetable day and period.
   Timetable writes validate teacher/year school relationships, and referenced
   years cannot be deleted while timetable or availability records exist.
@@ -102,6 +111,9 @@
 - Added `server/documents.test.mjs` (`npm run test:documents`) covering every
   document type, content accuracy, long names, draft exclusion, role/ID
   isolation, ZIP bundles, a large 480-lesson timetable, and regeneration.
+- Fixed the PDF Distribution Centre retaining an old target after academic-year
+  changes. It clears stale targets and previews, ignores out-of-order catalog
+  responses, and sends the selected year for previews, downloads, and ZIPs.
 
 ## Remaining implementation plan
 

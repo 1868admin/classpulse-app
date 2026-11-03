@@ -30,8 +30,8 @@ export default function Homerooms() {
       const [cls, yg, staff, ct] = await base44.queryBatch([
         { entity: 'HomeroomClass', query: { school_id: schoolId, archived: false }, options: { limit: 100, sort: 'name' } },
         { entity: 'YearGroup', query: { school_id: schoolId }, options: { limit: 50, sort: 'level' } },
-        { entity: 'SchoolMember', query: { school_id: schoolId, role: { $ne: 'school_admin' } }, options: { limit: 200, sort: 'full_name' } },
-        { entity: 'ClassTeacher', query: { school_id: schoolId, class_type: 'homeroom' }, options: { limit: 400 } },
+        { entity: 'SchoolMember', query: { school_id: schoolId, role: 'teacher', status: 'active', employment_status: { $ne: 'on_leave' } }, options: { limit: 200, sort: 'full_name' } },
+        { entity: 'ClassTeacher', query: { school_id: schoolId, class_type: 'homeroom', is_active: { $ne: false } }, options: { limit: 400 } },
       ]);
       setClasses(cls.items || []);
       setYearGroups(yg.items || []);

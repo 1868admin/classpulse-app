@@ -135,6 +135,7 @@ function teachesExamSubject(teacherId, exam, academicYearId) {
   const links = getRecords('ClassTeacher').filter((link) => (
     link.school_id === exam.school_id && link.member_id === teacherId
     && link.class_type === 'subject'
+    && link.is_active !== false
     && (!link.academic_year_id || link.academic_year_id === academicYearId)
   ));
   const classIds = new Set(links.map((link) => link.class_id));
@@ -161,7 +162,8 @@ function getExam(schoolId, examId) {
 
 function getTeacher(schoolId, teacherId) {
   const teacher = getRecord('SchoolMember', teacherId);
-  if (!teacher || teacher.school_id !== schoolId || teacher.role !== 'teacher' || teacher.status !== 'active') {
+  if (!teacher || teacher.school_id !== schoolId || teacher.role !== 'teacher' || teacher.status !== 'active'
+    || (teacher.employment_status || 'active') !== 'active') {
     fail('Choose an active teacher belonging to this school.', 400);
   }
   return teacher;
@@ -208,6 +210,8 @@ function assignmentRecord(member, exam, teacher, role, values = {}) {
     override_by: values.override_by || '',
     override_at: values.override_at || '',
     created_by: values.created_by || '',
+    reassignment_required: false,
+    staffing_issue_reason: '',
     updated_at: new Date().toISOString(),
   };
 }
@@ -277,7 +281,8 @@ function generateAssignments(actor, member, body) {
       || left.id.localeCompare(right.id));
   const teachers = getRecords('SchoolMember')
     .filter((teacher) => teacher.school_id === member.school_id
-      && teacher.role === 'teacher' && teacher.status === 'active');
+      && teacher.role === 'teacher' && teacher.status === 'active'
+      && (teacher.employment_status || 'active') === 'active');
   const unavailableIds = new Set(Array.isArray(body.unavailable_teacher_ids)
     ? body.unavailable_teacher_ids.map(String)
     : []);

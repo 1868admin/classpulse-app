@@ -35,7 +35,7 @@ export default function Attendance() {
     setLoading(true);
     const [cal, ct, hr, sc, tt, ses, staffRes] = await Promise.all([
       base44.entities.CalendarDate.filter({ school_id: schoolId, date }, { limit: 1 }),
-      base44.entities.ClassTeacher.filter({ school_id: schoolId, ...(isStaff ? {} : { member_id: member.id }) }, { limit: 300 }),
+      base44.entities.ClassTeacher.filter({ school_id: schoolId, is_active: { $ne: false }, ...(isStaff ? {} : { member_id: member.id }) }, { limit: 300 }),
       base44.entities.HomeroomClass.filter({ school_id: schoolId, archived: false }, { limit: 100, sort: 'name' }),
       base44.entities.SubjectClass.filter({ school_id: schoolId, archived: false }, { limit: 200, sort: 'name' }),
       base44.entities.TimetableEntry.filter({ school_id: schoolId, archived: false, ...(isStaff ? {} : { member_id: member.id }) }, { limit: 300 }),

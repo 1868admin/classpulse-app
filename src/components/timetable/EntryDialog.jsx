@@ -8,7 +8,7 @@ import { base44 } from '@/api/base44Client';
 import { useSchool } from '@/context/SchoolContext';
 import { notifySuccess, notifyError } from '@/lib/notify';
 
-export default function EntryDialog({ open, onOpenChange, entry, memberId, subjectClasses, defaultDay, defaultPeriod, academicYearId, onSaved }) {
+export default function EntryDialog({ open, onOpenChange, entry, memberId, teachers = [], isStaff = false, subjectClasses, defaultDay, defaultPeriod, academicYearId, onSaved }) {
   const { schoolId, school } = useSchool();
   const days = school?.day_names || ['Day 1', 'Day 2', 'Day 3', 'Day 4', 'Day 5'];
   const periods = school?.periods || [];
@@ -22,6 +22,7 @@ export default function EntryDialog({ open, onOpenChange, entry, memberId, subje
     const p = periods.find((x) => x.number === (entry?.period_number || defaultPeriod)) || periods[0] || {};
     setForm({
       day_name: entry?.day_name || defaultDay || days[0],
+      member_id: entry?.member_id || memberId,
       period_number: entry?.period_number || defaultPeriod || p.number || 1,
       start_time: entry?.start_time || p.start || '',
       end_time: entry?.end_time || p.end || '',
@@ -56,7 +57,7 @@ export default function EntryDialog({ open, onOpenChange, entry, memberId, subje
     try {
       const payload = {
         school_id: schoolId,
-        member_id: memberId,
+        member_id: form.member_id,
         academic_year_id: academicYearId || entry?.academic_year_id || '',
         day_name: form.day_name,
         period_number: Number(form.period_number),
@@ -68,6 +69,7 @@ export default function EntryDialog({ open, onOpenChange, entry, memberId, subje
         room: form.room,
         notes: form.notes,
         archived: false,
+        ...(entry?.reassignment_required ? { reassignment_required: false, staffing_issue_reason: '' } : {}),
       };
       if (entry) await base44.entities.TimetableEntry.update(entry.id, payload);
       else await base44.entities.TimetableEntry.create(payload);
@@ -95,6 +97,20 @@ export default function EntryDialog({ open, onOpenChange, entry, memberId, subje
       <DialogContent className="sm:max-w-lg">
         <DialogHeader><DialogTitle>{entry ? 'Edit lesson' : 'Add lesson'}</DialogTitle></DialogHeader>
         <form onSubmit={submit} className="grid gap-3.5 sm:grid-cols-2">
+          {isStaff && (
+            <div className="sm:col-span-2">
+              <Label className="mb-1.5 block text-[13px]">Assigned teacher</Label>
+              <Select value={form.member_id || ''} onValueChange={(value) => setForm((current) => ({ ...current, member_id: value }))}>
+                <SelectTrigger><SelectValue placeholder="Choose a teacher" /></SelectTrigger>
+                <SelectContent>
+                  {entry?.member_id && !teachers.some((item) => item.id === entry.member_id) && (
+                    <SelectItem value={entry.member_id}>Former or inactive teacher · review required</SelectItem>
+                  )}
+                  {teachers.map((teacher) => <SelectItem key={teacher.id} value={teacher.id}>{teacher.full_name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div>
             <Label className="mb-1.5 block text-[13px]">Timetable day</Label>
             <Select value={form.day_name} onValueChange={(v) => setForm((f) => ({ ...f, day_name: v }))}>

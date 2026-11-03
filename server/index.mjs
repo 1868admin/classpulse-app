@@ -225,8 +225,9 @@ function prepareTimetableEntry(entity, record) {
     throw Object.assign(new Error('Choose an academic year belonging to this school.'), { status: 400 });
   }
   const teacher = getRecord('SchoolMember', record.member_id);
-  if (!teacher || teacher.school_id !== record.school_id) {
-    throw Object.assign(new Error('Choose a teacher belonging to this school.'), { status: 400 });
+  if (!teacher || teacher.school_id !== record.school_id || teacher.role !== 'teacher'
+    || teacher.status !== 'active' || (teacher.employment_status || 'active') !== 'active') {
+    throw Object.assign(new Error('Choose an active teacher belonging to this school.'), { status: 400 });
   }
   return {
     ...record,
@@ -390,7 +391,12 @@ async function handleEntity(request, response, parts) {
     const updated = withTransaction(() => {
       const candidates = matches.map((record) => {
         ensureWritePermission(entity, record, actor, 'update');
-        const candidate = prepareEntityRecord(entity, { ...record, ...patch });
+        const merged = { ...record, ...patch };
+        if (entity === 'TimetableEntry' && patch.member_id && patch.member_id !== record.member_id) {
+          merged.reassignment_required = false;
+          merged.staffing_issue_reason = '';
+        }
+        const candidate = prepareEntityRecord(entity, merged);
         ensureWritePermission(entity, candidate, actor, 'update');
         return candidate;
       });
@@ -435,6 +441,12 @@ async function handleEntity(request, response, parts) {
     if (entity === 'Student' && !['school_admin', 'it_admin'].includes(actor.member?.role) && actor.user.role !== 'admin') {
       const { birth_paper_no, ...visibleRecord } = record;
       respond(response, 200, visibleRecord);
+    } else if (entity === 'SchoolMember' && actor.member?.role === 'teacher' && record.id !== actor.member.id) {
+      const {
+        employment_start_date, leave_date, departure_date, return_date,
+        employment_reason, employment_history, notes, ...visibleRecord
+      } = record;
+      respond(response, 200, visibleRecord);
     } else {
       respond(response, 200, record);
     }
@@ -456,7 +468,12 @@ async function handleEntity(request, response, parts) {
       throw Object.assign(new Error('You cannot move records outside your school'), { status: 403 });
     }
     const updated = withTransaction(() => {
-      const candidate = prepareEntityRecord(entity, { ...record, ...patch });
+      const merged = { ...record, ...patch };
+      if (entity === 'TimetableEntry' && patch.member_id && patch.member_id !== record.member_id) {
+        merged.reassignment_required = false;
+        merged.staffing_issue_reason = '';
+      }
+      const candidate = prepareEntityRecord(entity, merged);
       ensureWritePermission(entity, candidate, actor, 'update');
       assertTimetableEntriesAvailable(entity, [candidate], [recordId]);
       return updateRecord(entity, recordId, candidate);

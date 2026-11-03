@@ -75,7 +75,8 @@ export function getAccessibleRecords(entity, actor) {
   if (entity === 'InvigilationRequirement' && actor.member?.role === 'teacher') return [];
   if (['AttendanceRecord', 'AttendanceSession'].includes(entity) && actor.member?.role === 'teacher') {
     const assignedClasses = new Set(getRecords('ClassTeacher')
-      .filter((link) => link.school_id === actor.schoolId && link.member_id === actor.member.id)
+      .filter((link) => link.school_id === actor.schoolId && link.member_id === actor.member.id
+        && link.is_active !== false)
       .map((link) => `${link.class_type || 'homeroom'}|${link.class_id}`));
     return visible.filter((record) => assignedClasses.has(`${record.class_type || 'homeroom'}|${record.class_id}`));
   }
@@ -88,7 +89,17 @@ export function getAccessibleRecords(entity, actor) {
     const account = member.user_id
       ? database.prepare('SELECT username FROM accounts WHERE user_id = ?').get(member.user_id)
       : null;
-    return { ...member, has_local_login: !!account, username: account?.username || member.username || '' };
+    const result = { ...member, has_local_login: !!account, username: account?.username || member.username || '' };
+    if (actor.member?.role === 'teacher' && member.id !== actor.member.id) {
+      delete result.employment_start_date;
+      delete result.leave_date;
+      delete result.departure_date;
+      delete result.return_date;
+      delete result.employment_reason;
+      delete result.employment_history;
+      delete result.notes;
+    }
+    return result;
   });
 }
 

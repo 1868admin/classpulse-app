@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, FileArchive, Loader2, Printer, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -55,6 +55,7 @@ function CheckList({ title, items, selected, onChange }) {
 export default function DocumentCentre({ academicYears, academicYearId, onAcademicYearChange }) {
   const [catalog, setCatalog] = useState(null);
   const [loading, setLoading] = useState(false);
+  const catalogRequest = useRef(0);
   const [scope, setScope] = useState('published');
   const [type, setType] = useState('master_timetable');
   const [target, setTarget] = useState('');
@@ -67,19 +68,29 @@ export default function DocumentCentre({ academicYears, academicYearId, onAcadem
   const [supervision, setSupervision] = useState(false);
 
   const loadCatalog = useCallback(async () => {
+    const requestId = ++catalogRequest.current;
     setLoading(true);
     try {
-      setCatalog(await fetchDocumentCatalog(academicYearId));
+      const next = await fetchDocumentCatalog(academicYearId);
+      if (requestId === catalogRequest.current) setCatalog(next);
     } catch (error) {
-      notifyError(error, 'Could not load the document centre');
+      if (requestId === catalogRequest.current) notifyError(error, 'Could not load the document centre');
     } finally {
-      setLoading(false);
+      if (requestId === catalogRequest.current) setLoading(false);
     }
   }, [academicYearId]);
 
-  useEffect(() => { loadCatalog(); }, [loadCatalog]);
+  useEffect(() => {
+    setTarget('');
+    setPreview({ url: '', label: '' });
+    void loadCatalog();
+    return () => { catalogRequest.current += 1; };
+  }, [academicYearId, loadCatalog]);
   useEffect(() => () => { if (preview.url) URL.revokeObjectURL(preview.url); }, [preview.url]);
-  useEffect(() => { setTarget(''); }, [type]);
+  useEffect(() => {
+    setTarget('');
+    setPreview({ url: '', label: '' });
+  }, [type, scope]);
 
   const typeInfo = DOCUMENT_TYPES.find((item) => item.id === type);
   const options = useMemo(() => {
@@ -91,10 +102,10 @@ export default function DocumentCentre({ academicYears, academicYearId, onAcadem
 
   const params = useCallback((kind, value) => ({
     kind,
-    academic_year_id: catalog?.academic_year_id || academicYearId,
+    academic_year_id: academicYearId,
     scope,
     ...(value ? { [{ teacher: 'teacher_id', class: 'class_name', room: 'room' }[DOCUMENT_TYPES.find((item) => item.id === kind).target]]: value } : {}),
-  }), [catalog, academicYearId, scope]);
+  }), [academicYearId, scope]);
 
   const needsTarget = Boolean(typeInfo?.target);
   const canGenerate = !needsTarget || Boolean(target);
@@ -146,7 +157,7 @@ export default function DocumentCentre({ academicYears, academicYearId, onAcadem
     setBusy('zip');
     try {
       const blob = await fetchZipBlob({
-        academic_year_id: catalog?.academic_year_id || academicYearId,
+        academic_year_id: academicYearId,
         scope,
         items: bulkItems,
       });
@@ -176,7 +187,7 @@ export default function DocumentCentre({ academicYears, academicYearId, onAcadem
         <div className="grid gap-3 sm:grid-cols-3">
           <div>
             <p className="mb-1.5 text-xs font-medium">Academic year</p>
-            <Select value={catalog?.academic_year_id || academicYearId} onValueChange={onAcademicYearChange}>
+            <Select value={academicYearId} onValueChange={onAcademicYearChange}>
               <SelectTrigger><SelectValue placeholder="Choose an academic year" /></SelectTrigger>
               <SelectContent>{academicYears.map((year) => <SelectItem key={year.id} value={year.id}>{year.name}{year.is_current ? ' · Current' : ''}</SelectItem>)}</SelectContent>
             </Select>

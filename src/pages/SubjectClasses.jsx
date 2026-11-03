@@ -37,8 +37,8 @@ export default function SubjectClasses() {
         { entity: 'SubjectClass', query: { school_id: schoolId, archived: false }, options: { limit: 200, sort: 'name' } },
         { entity: 'YearGroup', query: { school_id: schoolId }, options: { limit: 50, sort: 'level' } },
         { entity: 'HomeroomClass', query: { school_id: schoolId, archived: false }, options: { limit: 100, sort: 'name' } },
-        { entity: 'SchoolMember', query: { school_id: schoolId, status: { $ne: 'inactive' } }, options: { limit: 200, sort: 'full_name' } },
-        { entity: 'ClassTeacher', query: { school_id: schoolId, class_type: 'subject' }, options: { limit: 500 } },
+        { entity: 'SchoolMember', query: { school_id: schoolId, role: 'teacher', status: 'active', employment_status: { $ne: 'on_leave' } }, options: { limit: 200, sort: 'full_name' } },
+        { entity: 'ClassTeacher', query: { school_id: schoolId, class_type: 'subject', is_active: { $ne: false } }, options: { limit: 500 } },
       ]);
       setClasses(cls.items || []);
       setYearGroups(yg.items || []);

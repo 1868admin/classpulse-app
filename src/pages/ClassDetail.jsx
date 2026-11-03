@@ -41,7 +41,7 @@ export default function ClassDetail({ type = 'subject' }) {
     try {
       const [cls, links, mem, ses, staff, yg, hr] = await base44.queryBatch([
         { entity, query: { school_id: schoolId, id }, options: { limit: 1 } },
-        { entity: 'ClassTeacher', query: { school_id: schoolId, class_id: id }, options: { limit: 50 } },
+        { entity: 'ClassTeacher', query: { school_id: schoolId, class_id: id, is_active: { $ne: false } }, options: { limit: 50 } },
         { entity: 'ClassMembership', query: { school_id: schoolId, class_id: id }, options: { limit: 300, sort: 'student_name' } },
         { entity: 'AttendanceSession', query: { school_id: schoolId, class_id: id }, options: { limit: 12, sort: '-date' } },
         { entity: 'SchoolMember', query: { school_id: schoolId, status: { $ne: 'inactive' } }, options: { limit: 200, sort: 'full_name' } },
