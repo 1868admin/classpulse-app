@@ -16,7 +16,9 @@ export default function MyProfileCard() {
     setForm({
       full_name: member?.full_name || '',
       phone: member?.phone || '',
-      subject_specialisms: member?.subject_specialisms || '',
+      subject_specialisms: Array.isArray(member?.subject_specialisms)
+        ? member.subject_specialisms.join(', ')
+        : member?.subject_specialisms || '',
     });
   }, [member]);
 

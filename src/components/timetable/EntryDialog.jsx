@@ -8,7 +8,7 @@ import { base44 } from '@/api/base44Client';
 import { useSchool } from '@/context/SchoolContext';
 import { notifySuccess, notifyError } from '@/lib/notify';
 
-export default function EntryDialog({ open, onOpenChange, entry, memberId, subjectClasses, defaultDay, defaultPeriod, onSaved }) {
+export default function EntryDialog({ open, onOpenChange, entry, memberId, subjectClasses, defaultDay, defaultPeriod, academicYearId, onSaved }) {
   const { schoolId, school } = useSchool();
   const days = school?.day_names || ['Day 1', 'Day 2', 'Day 3', 'Day 4', 'Day 5'];
   const periods = school?.periods || [];
@@ -57,6 +57,7 @@ export default function EntryDialog({ open, onOpenChange, entry, memberId, subje
       const payload = {
         school_id: schoolId,
         member_id: memberId,
+        academic_year_id: academicYearId || entry?.academic_year_id || '',
         day_name: form.day_name,
         period_number: Number(form.period_number),
         start_time: form.start_time,

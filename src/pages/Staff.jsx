@@ -65,14 +65,15 @@ export default function Staff() {
       ) : (
         <div className="cp-card overflow-hidden">
           <div className="cp-scroll-x">
-            <table className="w-full min-w-[640px] text-sm">
+            <table className="w-full min-w-[740px] text-sm">
               <thead className="cp-table-head">
                 <tr>
                   <th className="px-3 py-2.5">Name</th>
                   <th className="px-3 py-2.5">Local account</th>
                   <th className="px-3 py-2.5">Role</th>
                   <th className="px-3 py-2.5">Status</th>
-                  <th className="px-3 py-2.5">Subjects</th>
+                  <th className="px-3 py-2.5">Teacher number</th>
+                  <th className="px-3 py-2.5">Subject specialisations</th>
                   <th className="w-32 px-3 py-2.5 text-right">Actions</th>
                 </tr>
               </thead>
@@ -95,7 +96,8 @@ export default function Staff() {
                         {!m.has_local_login ? 'Password not set' : m.status === 'invited' ? 'Password not set' : m.status}
                       </span>
                     </td>
-                    <td className="max-w-[180px] truncate px-3 py-2.5 text-xs text-muted-foreground">{m.subject_specialisms || '—'}</td>
+                    <td className="px-3 py-2.5 text-xs text-muted-foreground">{m.teacher_number || '—'}</td>
+                    <td className="max-w-[220px] truncate px-3 py-2.5 text-xs text-muted-foreground">{Array.isArray(m.subject_specialisms) ? m.subject_specialisms.join(', ') || '—' : m.subject_specialisms || '—'}</td>
                     <td className="px-3 py-2.5">
                       <div className="flex items-center justify-end gap-1">
                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => createLink(m)} aria-label="Create setup or password reset link" title="Create account setup / password reset link">

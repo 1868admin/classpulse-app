@@ -1,12 +1,51 @@
 import { createRecord, database, deleteRecord, entityDefinitions, getRecord, getRecords, updateRecord, withTransaction } from './database.mjs';
 import { paginate, queryRecords } from './query.mjs';
 import { createLocalAccount, createLoginLink, disableAccount, ensureLocalAccount, getAccountForUser, setAccountActive, updateAccountCredentials, updateUser } from './auth.mjs';
+import { assertNoTimetableConflicts } from './timetable.mjs';
 
 const isStaff = (member) => member && ['school_admin', 'it_admin'].includes(member.role);
 const isSchoolAdmin = (member) => member?.role === 'school_admin';
 const inSchool = (record, schoolId) => record?.school_id === schoolId;
 const records = (entity, predicate = () => true) => getRecords(entity).filter(predicate);
 const find = (entity, predicate) => records(entity, predicate)[0] || null;
+
+function readSubjectSpecialisms(value) {
+  const items = Array.isArray(value) ? value : String(value || '').split(',');
+  return items.map((item) => String(item || '').trim().replace(/\s+/g, ' ')).filter(Boolean);
+}
+
+function normalizeSubjectSpecialisms(value) {
+  const normalized = [];
+  const seen = new Set();
+  for (const subject of readSubjectSpecialisms(value)) {
+    const key = subject.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    if (subject.length > 80 || normalized.length >= 30) {
+      throw Object.assign(new Error('Subject specialisms must be no more than 30 subjects, each 80 characters or fewer.'), { status: 400 });
+    }
+    normalized.push(subject);
+    seen.add(key);
+  }
+  return normalized;
+}
+
+function normalizeTeacherNumber(value) {
+  const teacherNumber = String(value || '').trim();
+  if (teacherNumber.length > 40) {
+    throw Object.assign(new Error('Teacher numbers must be 40 characters or fewer.'), { status: 400 });
+  }
+  return teacherNumber;
+}
+
+function assertUniqueTeacherNumber(schoolId, teacherNumber, excludeId = '') {
+  if (!teacherNumber) return;
+  const normalized = teacherNumber.toLocaleLowerCase();
+  if (records('SchoolMember').some((item) => item.school_id === schoolId
+    && item.id !== excludeId
+    && String(item.teacher_number || '').trim().toLocaleLowerCase() === normalized)) {
+    throw Object.assign(new Error('That teacher number is already in use at this school.'), { status: 409 });
+  }
+}
 
 function requireActor(actor) {
   if (!actor) throw Object.assign(new Error('Unauthorized'), { status: 401 });
@@ -75,6 +114,9 @@ function sessionContext(actor) {
           status: actor.member.status,
           full_name: actor.member.full_name,
           school_id: actor.member.school_id,
+          phone: actor.member.phone || '',
+          teacher_number: actor.member.teacher_number || '',
+          subject_specialisms: readSubjectSpecialisms(actor.member.subject_specialisms),
         }
       : null,
     school: school
@@ -185,6 +227,9 @@ function manageStaff(actor, body) {
     const fullName = String(body.full_name || '').trim().replace(/\s+/g, ' ');
     const role = body.role || 'teacher';
     const username = String(body.username || email.split('@')[0] || '').trim();
+    const teacherNumber = normalizeTeacherNumber(body.teacher_number);
+    const subjectSpecialisms = normalizeSubjectSpecialisms(body.subject_specialisms);
+    assertUniqueTeacherNumber(schoolId, teacherNumber);
     if (!fullName) {
       throw Object.assign(new Error("Enter the staff member's full name"), { status: 400 });
     }
@@ -226,7 +271,8 @@ function manageStaff(actor, body) {
         password_set: hasPassword,
         username: accountUsername,
         phone: body.phone || '',
-        subject_specialisms: body.subject_specialisms || '',
+        teacher_number: teacherNumber,
+        subject_specialisms: subjectSpecialisms,
       });
       updateUser(user.id, { member_id: created.id });
       audit({ ...actor, member }, {
@@ -255,13 +301,21 @@ function manageStaff(actor, body) {
     }
     const fullName = body.full_name === undefined ? target.full_name : String(body.full_name).trim().replace(/\s+/g, ' ');
     if (!fullName) throw Object.assign(new Error("Enter the staff member's full name"), { status: 400 });
+    const teacherNumber = body.teacher_number === undefined
+      ? String(target.teacher_number || '').trim()
+      : normalizeTeacherNumber(body.teacher_number);
+    assertUniqueTeacherNumber(schoolId, teacherNumber, target.id);
+    const subjectSpecialisms = body.subject_specialisms === undefined
+      ? normalizeSubjectSpecialisms(target.subject_specialisms)
+      : normalizeSubjectSpecialisms(body.subject_specialisms);
     const patch = {
       full_name: fullName,
       role: body.role || target.role,
       status: body.status || target.status,
       username: body.username || target.username || '',
       phone: body.phone ?? target.phone ?? '',
-      subject_specialisms: body.subject_specialisms ?? target.subject_specialisms ?? '',
+      teacher_number: teacherNumber,
+      subject_specialisms: subjectSpecialisms,
     };
 
     return withTransaction(() => {
@@ -391,7 +445,7 @@ function updateMyProfile(actor, body) {
     patch.full_name = fullName;
   }
   if (body.phone !== undefined) patch.phone = String(body.phone).trim().slice(0, 40);
-  if (body.subject_specialisms !== undefined) patch.subject_specialisms = String(body.subject_specialisms).trim().slice(0, 160);
+  if (body.subject_specialisms !== undefined) patch.subject_specialisms = normalizeSubjectSpecialisms(body.subject_specialisms);
   if (!Object.keys(patch).length) throw Object.assign(new Error('Nothing to save'), { status: 400 });
 
   return withTransaction(() => {
@@ -466,7 +520,13 @@ function saveTimetableEntries(actor, body) {
   if (!target || target.school_id !== schoolId) {
     throw Object.assign(new Error('Teacher not found'), { status: 404 });
   }
-  const academicYear = find('AcademicYear', (year) => year.school_id === schoolId && year.is_current);
+  const currentAcademicYear = find('AcademicYear', (year) => year.school_id === schoolId && year.is_current);
+  const academicYear = body.academic_year_id
+    ? getRecord('AcademicYear', body.academic_year_id)
+    : currentAcademicYear;
+  if (body.academic_year_id && academicYear?.school_id !== schoolId) {
+    throw Object.assign(new Error('Choose an academic year belonging to this school.'), { status: 400 });
+  }
   const seen = new Set();
   const problems = [];
   const rows = [];
@@ -504,10 +564,20 @@ function saveTimetableEntries(actor, body) {
   }
 
   return withTransaction(() => {
+    const existing = records('TimetableEntry', (item) => item.school_id === schoolId && !item.archived);
+    const targetYearId = academicYear?.id || '';
+    const belongsToTargetYear = (item) => (
+      (item.academic_year_id || currentAcademicYear?.id || '') === targetYearId
+    );
+    const replacedIds = body.mode === 'replace'
+      ? existing.filter((item) => item.member_id === target.id && belongsToTargetYear(item)).map((item) => item.id)
+      : [];
+    assertNoTimetableConflicts(rows, existing, { ignoreIds: replacedIds });
+
     let archived = 0;
     if (body.mode === 'replace') {
-      const existing = records('TimetableEntry', (item) => item.school_id === schoolId && item.member_id === target.id && !item.archived);
-      for (const entry of existing) {
+      const previous = existing.filter((item) => item.member_id === target.id && belongsToTargetYear(item));
+      for (const entry of previous) {
         updateRecord('TimetableEntry', entry.id, { archived: true });
         archived += 1;
       }
@@ -516,7 +586,7 @@ function saveTimetableEntries(actor, body) {
     audit({ ...actor, member }, {
       action: 'timetable.saved',
       entityType: 'TimetableEntry',
-      summary: `Saved ${created.length} timetable entries for ${target.full_name}${archived ? ` (${archived} previous archived)` : ''}${problems.length ? ` · ${problems.length} row problem(s)` : ''}`,
+      summary: `Saved ${created.length} timetable entries for ${target.full_name}${academicYear ? ` · ${academicYear.name}` : ''}${archived ? ` (${archived} previous archived)` : ''}${problems.length ? ` · ${problems.length} row problem(s)` : ''}`,
     });
     return { saved: created.length, archived, problems };
   });

@@ -10,11 +10,15 @@ import TimetableUploadDialog from '@/components/timetable/TimetableUploadDialog'
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { fmtTime } from '@/lib/dates';
+import { notifyError } from '@/lib/notify';
 
 export default function Timetable() {
   const { schoolId, school, member, isStaff } = useSchool();
   const [params] = useSearchParams();
   const [teachers, setTeachers] = useState([]);
+  const [academicYears, setAcademicYears] = useState([]);
+  const [academicYearId, setAcademicYearId] = useState('');
+  const [yearsReady, setYearsReady] = useState(false);
   const [targetId, setTargetId] = useState(member?.id || '');
   const [entries, setEntries] = useState([]);
   const [subjects, setSubjects] = useState([]);
@@ -29,28 +33,61 @@ export default function Timetable() {
   useEffect(() => { if (params.get('upload') === '1') setUploadOpen(true); }, [params]);
 
   useEffect(() => {
+    if (!schoolId) return undefined;
+    let active = true;
+    setYearsReady(false);
+    setAcademicYears([]);
+    setAcademicYearId('');
+    base44.entities.AcademicYear.filter({ school_id: schoolId }, { limit: 50, sort: '-name' })
+      .then((page) => {
+        if (!active) return;
+        const items = page.items || [];
+        setAcademicYears(items);
+        setAcademicYearId(items.find((year) => year.is_current)?.id || items[0]?.id || '');
+      })
+      .catch((error) => {
+        if (active) notifyError('Could not load academic years', error.message);
+      })
+      .finally(() => {
+        if (active) setYearsReady(true);
+      });
+    return () => { active = false; };
+  }, [schoolId]);
+
+  useEffect(() => {
     if (!schoolId || !isStaff) return;
     base44.entities.SchoolMember.filter({ school_id: schoolId, role: { $ne: 'school_admin' }, status: { $ne: 'inactive' } }, { limit: 200, sort: 'full_name' })
-      .then((p) => setTeachers(p.items || []));
+      .then((p) => setTeachers(p.items || []))
+      .catch((error) => notifyError('Could not load teachers', error.message));
   }, [schoolId, isStaff]);
 
   const load = useCallback(async () => {
-    if (!schoolId || !targetId) return;
+    if (!schoolId || !targetId || !yearsReady) return;
     setLoading(true);
-    const [ent, links] = await Promise.all([
-      base44.entities.TimetableEntry.filter({ school_id: schoolId, member_id: targetId, archived: false }, { limit: 200 }),
-      base44.entities.ClassTeacher.filter({ school_id: schoolId, member_id: targetId, class_type: 'subject' }, { limit: 200 }),
-    ]);
-    const classIds = (links.items || []).map((l) => l.class_id);
-    let classes = [];
-    if (classIds.length) {
-      const res = await base44.entities.SubjectClass.filter({ school_id: schoolId, id: { $in: classIds }, archived: false }, { limit: 200 });
-      classes = res.items || [];
+    try {
+      const [ent, links] = await Promise.all([
+        base44.entities.TimetableEntry.filter({ school_id: schoolId, member_id: targetId, archived: false }, { limit: 200 }),
+        base44.entities.ClassTeacher.filter({ school_id: schoolId, member_id: targetId, class_type: 'subject' }, { limit: 200 }),
+      ]);
+      const currentYearId = academicYears.find((year) => year.is_current)?.id || '';
+      const displayYearId = academicYearId || currentYearId;
+      const visibleEntries = (ent.items || []).filter((entry) => !displayYearId
+        || entry.academic_year_id === displayYearId
+        || (!entry.academic_year_id && displayYearId === currentYearId));
+      const classIds = (links.items || []).map((link) => link.class_id);
+      let classes = [];
+      if (classIds.length) {
+        const res = await base44.entities.SubjectClass.filter({ school_id: schoolId, id: { $in: classIds }, archived: false }, { limit: 200 });
+        classes = res.items || [];
+      }
+      setEntries(visibleEntries);
+      setSubjects(classes);
+    } catch (error) {
+      notifyError('Could not load timetable', error.message);
+    } finally {
+      setLoading(false);
     }
-    setEntries(ent.items || []);
-    setSubjects(classes);
-    setLoading(false);
-  }, [schoolId, targetId]);
+  }, [schoolId, targetId, yearsReady, academicYears, academicYearId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -78,16 +115,28 @@ export default function Timetable() {
         }
       />
 
-      {isStaff && (
-        <div className="mb-3 max-w-xs">
-          <Select value={targetId} onValueChange={setTargetId}>
-            <SelectTrigger><SelectValue placeholder="Choose a teacher" /></SelectTrigger>
-            <SelectContent>
-              {teachers.map((t) => <SelectItem key={t.id} value={t.id}>{t.full_name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
+      <div className="mb-3 flex flex-wrap gap-3">
+        {isStaff && (
+          <div className="w-full max-w-xs">
+            <Select value={targetId} onValueChange={setTargetId}>
+              <SelectTrigger><SelectValue placeholder="Choose a teacher" /></SelectTrigger>
+              <SelectContent>
+                {teachers.map((teacher) => <SelectItem key={teacher.id} value={teacher.id}>{teacher.full_name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+        {academicYears.length > 0 && (
+          <div className="w-full max-w-xs">
+            <Select value={academicYearId} onValueChange={setAcademicYearId}>
+              <SelectTrigger><SelectValue placeholder="Choose an academic year" /></SelectTrigger>
+              <SelectContent>
+                {academicYears.map((year) => <SelectItem key={year.id} value={year.id}>{year.name}{year.is_current ? ' · Current' : ''}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+      </div>
 
       {!targetId ? (
         <p className="text-sm text-muted-foreground">Choose a teacher to view their timetable.</p>
@@ -148,6 +197,7 @@ export default function Timetable() {
         memberId={targetId}
         defaultDay={entryDialog?.day}
         defaultPeriod={entryDialog?.period}
+        academicYearId={academicYearId}
         subjectClasses={subjects}
         onSaved={load}
       />
@@ -156,6 +206,7 @@ export default function Timetable() {
         open={uploadOpen}
         onOpenChange={setUploadOpen}
         memberId={targetId}
+        academicYearId={academicYearId}
         subjectClasses={subjects}
         canCreateClasses={!isStaff || targetId === member?.id}
         onSaved={load}

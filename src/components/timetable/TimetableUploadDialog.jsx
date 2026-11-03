@@ -20,7 +20,7 @@ const FIELDS = [
   { key: 'notes', label: 'Notes' },
 ];
 
-export default function TimetableUploadDialog({ open, onOpenChange, memberId, subjectClasses, canCreateClasses, onSaved }) {
+export default function TimetableUploadDialog({ open, onOpenChange, memberId, subjectClasses, academicYearId, canCreateClasses, onSaved }) {
   const { schoolId, school } = useSchool();
   const fileRef = useRef(null);
   const [headers, setHeaders] = useState([]);
@@ -121,7 +121,12 @@ export default function TimetableUploadDialog({ open, onOpenChange, memberId, su
           notes: r.notes,
         };
       });
-      const res = await base44.functions.invoke('saveTimetableEntries', { entries, mode: 'replace', member_id: memberId });
+      const res = await base44.functions.invoke('saveTimetableEntries', {
+        entries,
+        mode: 'replace',
+        member_id: memberId,
+        academic_year_id: academicYearId,
+      });
       if (res.data?.error) throw new Error(res.data.error);
       setResult(res.data);
       notifySuccess('Timetable saved', `${res.data.saved} lesson(s) imported.`);

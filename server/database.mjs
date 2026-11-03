@@ -56,6 +56,12 @@ function initializeSqliteDatabase(db, local = false) {
   if (local) {
     db.exec('CREATE INDEX IF NOT EXISTS records_by_school ON records(entity, school_id)');
     db.exec('CREATE INDEX IF NOT EXISTS sessions_by_expiry ON sessions(expires_at)');
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS records_teacher_number_unique
+      ON records(school_id, lower(trim(json_extract(data, '$.teacher_number'))))
+      WHERE entity = 'SchoolMember'
+        AND trim(COALESCE(json_extract(data, '$.teacher_number'), '')) <> ''
+    `);
   }
 }
 
@@ -152,6 +158,9 @@ const postgresSchema = `
       COALESCE(data->>'destination_academic_year_id', '')
     )
     WHERE entity = 'StudentEnrollment';
+  CREATE UNIQUE INDEX IF NOT EXISTS records_teacher_number_unique
+    ON records(school_id, lower(btrim(data->>'teacher_number')))
+    WHERE entity = 'SchoolMember' AND btrim(COALESCE(data->>'teacher_number', '')) <> '';
   CREATE TABLE IF NOT EXISTS student_id_sequences (
     school_id TEXT NOT NULL,
     cohort_key TEXT NOT NULL,
@@ -432,6 +441,7 @@ export async function withRequestDatabase(callback) {
           records_class_membership_unique: 'This student is already assigned to that class.',
           records_attendance_session_unique: 'An attendance session already exists for this class and date.',
           records_student_enrollment_unique: 'This student enrollment already exists.',
+          records_teacher_number_unique: 'That teacher number is already in use at this school.',
         };
         console.error('PostgreSQL unique constraint violation:', error.constraint || 'unknown');
         throw Object.assign(new Error(messages[error.constraint] || 'This change conflicts with existing data. Refresh and try again.'), {

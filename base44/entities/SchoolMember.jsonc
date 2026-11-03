@@ -34,11 +34,18 @@
     "username": {
       "type": "string"
     },
+    "teacher_number": {
+      "type": "string"
+    },
     "phone": {
       "type": "string"
     },
     "subject_specialisms": {
-      "type": "string"
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
     },
     "notes": {
       "type": "string"

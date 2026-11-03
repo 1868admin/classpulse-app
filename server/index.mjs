@@ -20,6 +20,7 @@ import {
   deleteRecord,
   entityDefinitions,
   getRecord,
+  getRecords,
   isPostgresMode,
   updateRecord,
   withRequestDatabase,
@@ -27,6 +28,7 @@ import {
 } from './database.mjs';
 import { paginate, queryRecords } from './query.mjs';
 import { invokeFunction } from './functions.mjs';
+import { assertNoTimetableConflicts, getCurrentAcademicYearId } from './timetable.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const distDirectory = path.join(root, 'dist');
@@ -137,6 +139,28 @@ function ensureWritePermission(entity, record, actor, operation) {
     if (operation !== 'create') ensureRecordAccess(entity, record, actor);
     return;
   }
+  if (entity === 'TeacherAvailability') {
+    if (actor.user.role !== 'admin') {
+      if (!actor.member || actor.member.status !== 'active' || actor.member.school_id !== record?.school_id) {
+        throw Object.assign(new Error('You cannot change availability outside your active school'), { status: 403 });
+      }
+      if (!['school_admin', 'it_admin'].includes(actor.member.role) && record.member_id !== actor.member.id) {
+        throw Object.assign(new Error('Teachers can only manage their own availability'), { status: 403 });
+      }
+    }
+    return;
+  }
+  if (entity === 'AcademicYear' && operation === 'delete') {
+    const isCurrentYear = getCurrentAcademicYearId(record.school_id) === record.id;
+    const hasRelatedTimetableData = getRecords('TimetableEntry').some((item) =>
+      item.school_id === record.school_id
+      && (item.academic_year_id === record.id || (isCurrentYear && !item.academic_year_id)))
+      || getRecords('TeacherAvailability').some((item) =>
+        item.school_id === record.school_id && item.academic_year_id === record.id);
+    if (hasRelatedTimetableData) {
+      throw Object.assign(new Error('An academic year with timetable or teacher availability records cannot be deleted.'), { status: 409 });
+    }
+  }
   if (entity === 'Student' && operation === 'create') {
     throw Object.assign(new Error('Create students through the student management workflow'), { status: 403 });
   }
@@ -158,6 +182,68 @@ function ensureWritePermission(entity, record, actor, operation) {
 function applyQuery(entity, actor, query) {
   const rows = queryRecords(entity, actor, query);
   return rows;
+}
+
+function prepareTimetableEntry(entity, record) {
+  if (entity !== 'TimetableEntry') return record;
+  const academicYearId = record.academic_year_id || getCurrentAcademicYearId(record.school_id);
+  if (academicYearId && getRecord('AcademicYear', academicYearId)?.school_id !== record.school_id) {
+    throw Object.assign(new Error('Choose an academic year belonging to this school.'), { status: 400 });
+  }
+  const teacher = getRecord('SchoolMember', record.member_id);
+  if (!teacher || teacher.school_id !== record.school_id) {
+    throw Object.assign(new Error('Choose a teacher belonging to this school.'), { status: 400 });
+  }
+  return {
+    ...record,
+    academic_year_id: academicYearId,
+  };
+}
+
+function prepareTeacherAvailability(entity, record) {
+  if (entity !== 'TeacherAvailability') return record;
+  const teacher = getRecord('SchoolMember', record.member_id);
+  const academicYear = getRecord('AcademicYear', record.academic_year_id);
+  const period = Number(record.period_number);
+  const start = record.start_time || '';
+  const end = record.end_time || '';
+  if (!teacher || teacher.school_id !== record.school_id || teacher.role !== 'teacher') {
+    throw Object.assign(new Error('Choose a teacher belonging to this school.'), { status: 400 });
+  }
+  if (!academicYear || academicYear.school_id !== record.school_id) {
+    throw Object.assign(new Error('Choose an academic year belonging to this school.'), { status: 400 });
+  }
+  if (!String(record.day_name || '').trim() || !Number.isInteger(period) || period < 1) {
+    throw Object.assign(new Error('Availability requires a timetable day and positive period number.'), { status: 400 });
+  }
+  if (record.is_available === true) {
+    throw Object.assign(new Error('Availability records currently define unavailable periods only.'), { status: 400 });
+  }
+  if (Boolean(start) !== Boolean(end)) {
+    throw Object.assign(new Error('Provide both a start time and an end time.'), { status: 400 });
+  }
+  if (start || end) {
+    const timeMinutes = (value) => {
+      if (!/^\d{2}:\d{2}$/.test(String(value))) return null;
+      const [hours, minutes] = value.split(':').map(Number);
+      return hours <= 23 && minutes <= 59 ? hours * 60 + minutes : null;
+    };
+    const startMinutes = timeMinutes(start);
+    const endMinutes = timeMinutes(end);
+    if (startMinutes === null || endMinutes === null || startMinutes >= endMinutes) {
+      throw Object.assign(new Error('Availability times must be valid and the start must be before the end.'), { status: 400 });
+    }
+  }
+  return { ...record, period_number: period, is_available: false };
+}
+
+function prepareEntityRecord(entity, record) {
+  return prepareTeacherAvailability(entity, prepareTimetableEntry(entity, record));
+}
+
+function assertTimetableEntriesAvailable(entity, candidates, ignoreIds = []) {
+  if (entity !== 'TimetableEntry') return;
+  assertNoTimetableConflicts(candidates, getRecords('TimetableEntry'), { ignoreIds });
 }
 
 async function handleAuth(request, response, parts) {
@@ -239,10 +325,16 @@ async function handleEntity(request, response, parts) {
     if (!Array.isArray(incoming) || incoming.length > 2000) {
       throw Object.assign(new Error('Bulk create expects an array of no more than 2,000 records'), { status: 400 });
     }
-    const created = withTransaction(() => incoming.map((record) => {
-      ensureWritePermission(entity, record, actor, 'create');
-      return createRecord(entity, record);
-    }));
+    const created = withTransaction(() => {
+      const candidates = incoming.map((record) => {
+        ensureWritePermission(entity, record, actor, 'create');
+        const candidate = prepareEntityRecord(entity, record);
+        ensureWritePermission(entity, candidate, actor, 'create');
+        return candidate;
+      });
+      assertTimetableEntriesAvailable(entity, candidates);
+      return candidates.map((record) => createRecord(entity, record));
+    });
     respond(response, 201, created);
     return true;
   }
@@ -261,10 +353,19 @@ async function handleEntity(request, response, parts) {
       throw Object.assign(new Error('Only school administrators and IT administrators can manage birth paper numbers'), { status: 403 });
     }
     const matches = applyQuery(entity, actor, query);
-    const updated = withTransaction(() => matches.map((record) => {
-      ensureWritePermission(entity, record, actor, 'update');
-      return updateRecord(entity, record.id, patch);
-    }));
+    const updated = withTransaction(() => {
+      const candidates = matches.map((record) => {
+        ensureWritePermission(entity, record, actor, 'update');
+        const candidate = prepareEntityRecord(entity, { ...record, ...patch });
+        ensureWritePermission(entity, candidate, actor, 'update');
+        return candidate;
+      });
+      assertTimetableEntriesAvailable(entity, candidates, matches.map((record) => record.id));
+      return matches.map((record, index) => {
+        ensureWritePermission(entity, record, actor, 'update');
+        return updateRecord(entity, record.id, candidates[index]);
+      });
+    });
     respond(response, 200, { updated: updated.length });
     return true;
   }
@@ -281,7 +382,13 @@ async function handleEntity(request, response, parts) {
   if (!action && method === 'POST') {
     const record = await readJson(request);
     ensureWritePermission(entity, record, actor, 'create');
-    respond(response, 201, createRecord(entity, record));
+    const created = withTransaction(() => {
+      const candidate = prepareEntityRecord(entity, record);
+      ensureWritePermission(entity, candidate, actor, 'create');
+      assertTimetableEntriesAvailable(entity, [candidate]);
+      return createRecord(entity, candidate);
+    });
+    respond(response, 201, created);
     return true;
   }
   if (!action || action === 'bulk' || action === 'filter' || action === 'count') return false;
@@ -314,7 +421,13 @@ async function handleEntity(request, response, parts) {
     if (patch.school_id !== undefined && actor.user.role !== 'admin' && patch.school_id !== actor.schoolId) {
       throw Object.assign(new Error('You cannot move records outside your school'), { status: 403 });
     }
-    respond(response, 200, updateRecord(entity, recordId, patch));
+    const updated = withTransaction(() => {
+      const candidate = prepareEntityRecord(entity, { ...record, ...patch });
+      ensureWritePermission(entity, candidate, actor, 'update');
+      assertTimetableEntriesAvailable(entity, [candidate], [recordId]);
+      return updateRecord(entity, recordId, candidate);
+    });
+    respond(response, 200, updated);
     return true;
   }
   if (method === 'DELETE') {
