@@ -2,6 +2,7 @@ import { createRecord, database, deleteRecord, entityDefinitions, getRecord, get
 import { paginate, queryRecords } from './query.mjs';
 import { createLocalAccount, createLoginLink, disableAccount, ensureLocalAccount, getAccountForUser, setAccountActive, updateAccountCredentials, updateUser } from './auth.mjs';
 import { assertNoTimetableConflicts } from './timetable.mjs';
+import { manageInvigilation } from './invigilation.mjs';
 
 const isStaff = (member) => member && ['school_admin', 'it_admin'].includes(member.role);
 const isSchoolAdmin = (member) => member?.role === 'school_admin';
@@ -656,6 +657,242 @@ function approveGeneratedTimetable(actor, body) {
       summary: `Approved generated timetable for ${academicYear.name}: ${created.length} lesson(s)${replaceIds.length ? `, replacing ${replaceIds.length}` : ''}`,
     });
     return { approved: created.length, archived: replaceIds.length, academic_year_id: academicYear.id };
+  });
+}
+
+function examinationDate(value) {
+  const date = String(value || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return '';
+  const parsed = new Date(`${date}T00:00:00.000Z`);
+  return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date ? '' : date;
+}
+
+function examinationMinutes(value) {
+  if (!/^\d{2}:\d{2}$/.test(String(value || ''))) return null;
+  const [hours, minutes] = value.split(':').map(Number);
+  if (hours > 23 || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
+
+function examinationStudents(entry, memberships, studentsById, currentAcademicYearId) {
+  return new Set(memberships.filter((membership) => (
+    membership.school_id === entry.school_id
+    && membership.class_type === entry.class_type
+    && membership.class_id === entry.class_id
+  )).filter((membership) => {
+    const student = studentsById.get(membership.student_id);
+    const membershipYearId = membership.academic_year_id
+      || student?.academic_year_id
+      || currentAcademicYearId;
+    return student?.school_id === entry.school_id
+      && membershipYearId === entry.academic_year_id
+      && !student.archived
+      && (!student.status || student.status === 'active')
+      && (!student.academic_year_id || student.academic_year_id === entry.academic_year_id);
+  }).map((membership) => membership.student_id));
+}
+
+function assertNoExaminationConflicts(candidates, existing, ignoreIds = []) {
+  const ignored = new Set(ignoreIds);
+  const scheduled = existing.filter((entry) => entry.status !== 'archived' && !ignored.has(entry.id));
+  const schoolId = candidates[0]?.school_id;
+  const currentAcademicYearId = find('AcademicYear', (year) => year.school_id === schoolId && year.is_current)?.id || '';
+  const memberships = records('ClassMembership', (membership) => membership.school_id === schoolId);
+  const studentsById = new Map(records('Student', (student) => student.school_id === schoolId)
+    .map((student) => [student.id, student]));
+  const rosterCache = new Map();
+  const studentsFor = (entry) => {
+    const key = `${entry.academic_year_id}|${entry.class_type}|${entry.class_id}`;
+    if (!rosterCache.has(key)) {
+      rosterCache.set(key, examinationStudents(entry, memberships, studentsById, currentAcademicYearId));
+    }
+    return rosterCache.get(key);
+  };
+  const candidateStudents = candidates.map(studentsFor);
+  const scheduledStudents = new Map(scheduled.map((entry) => [entry.id, studentsFor(entry)]));
+  const conflicts = [];
+
+  candidates.forEach((candidate, index) => {
+    const start = examinationMinutes(candidate.start_time);
+    const end = examinationMinutes(candidate.end_time);
+    for (const other of scheduled) {
+      if (candidate.exam_date !== other.exam_date) continue;
+      const otherStart = examinationMinutes(other.start_time);
+      const otherEnd = examinationMinutes(other.end_time);
+      if (start >= otherEnd || otherStart >= end) continue;
+
+      const sharedStudents = [...candidateStudents[index]]
+        .filter((studentId) => scheduledStudents.get(other.id)?.has(studentId));
+      const sameClass = candidate.class_type === other.class_type && candidate.class_id === other.class_id;
+      const sameRoom = candidate.room.trim().toLocaleLowerCase() === other.room.trim().toLocaleLowerCase();
+      if (sameClass) {
+        conflicts.push({ row: index + 1, type: 'class', conflicting_entry_id: other.id });
+      }
+      if (sameRoom) {
+        conflicts.push({ row: index + 1, type: 'room', conflicting_entry_id: other.id });
+      }
+      if (sharedStudents.length) {
+        conflicts.push({
+          row: index + 1,
+          type: 'student',
+          conflicting_entry_id: other.id,
+          conflicting_student_count: sharedStudents.length,
+        });
+      }
+    }
+  });
+
+  if (conflicts.length) {
+    const messages = [...new Set(conflicts.map((conflict) => {
+      if (conflict.type === 'class') return `Row ${conflict.row}: this class already has an examination at that time.`;
+      if (conflict.type === 'room') return `Row ${conflict.row}: this room is already booked at that time.`;
+      return `Row ${conflict.row}: ${conflict.conflicting_student_count} enrolled student(s) already have an examination at that time.`;
+    }))];
+    throw Object.assign(new Error(`Examination timetable conflict detected. ${messages.slice(0, 5).join(' ')}`), {
+      status: 409,
+      details: { conflicts: conflicts.slice(0, 100) },
+    });
+  }
+}
+
+function normalizeExaminationSchedule(schoolId, exam) {
+  if (!exam || typeof exam !== 'object' || Array.isArray(exam)) {
+    throw Object.assign(new Error('Examination schedule details are required.'), { status: 400 });
+  }
+  const academicYear = getRecord('AcademicYear', String(exam.academic_year_id || ''));
+  if (!academicYear || academicYear.school_id !== schoolId) {
+    throw Object.assign(new Error('Choose an academic year belonging to this school.'), { status: 400 });
+  }
+  const classType = String(exam.class_type || '');
+  if (!['homeroom', 'subject'].includes(classType)) {
+    throw Object.assign(new Error('Choose a homeroom or subject class.'), { status: 400 });
+  }
+  const classId = String(exam.class_id || '');
+  const classEntity = classType === 'homeroom' ? 'HomeroomClass' : 'SubjectClass';
+  const klass = getRecord(classEntity, classId);
+  if (!klass || klass.school_id !== schoolId || klass.archived) {
+    throw Object.assign(new Error('Choose an active class belonging to this school.'), { status: 400 });
+  }
+  if (klass.academic_year_id && klass.academic_year_id !== academicYear.id) {
+    throw Object.assign(new Error('The selected class belongs to a different academic year.'), { status: 400 });
+  }
+
+  const examDate = examinationDate(exam.exam_date);
+  if (!examDate) {
+    throw Object.assign(new Error('Enter a valid examination date.'), { status: 400 });
+  }
+  if ((academicYear.start_date && examDate < academicYear.start_date)
+    || (academicYear.end_date && examDate > academicYear.end_date)) {
+    throw Object.assign(new Error('The examination date must be within the selected academic year.'), { status: 400 });
+  }
+  const startTime = String(exam.start_time || '');
+  const endTime = String(exam.end_time || '');
+  const startMinutes = examinationMinutes(startTime);
+  const endMinutes = examinationMinutes(endTime);
+  if (startMinutes === null || endMinutes === null || startMinutes >= endMinutes) {
+    throw Object.assign(new Error('Examination times must be valid and the start must be before the end.'), { status: 400 });
+  }
+
+  const examName = String(exam.exam_name || '').trim();
+  const subject = classType === 'subject' ? String(klass.subject || '').trim() : String(exam.subject || '').trim();
+  const room = String(exam.room || '').trim();
+  const notes = String(exam.notes || '').trim();
+  if (!examName || examName.length > 120 || !subject || subject.length > 120 || !room || room.length > 120) {
+    throw Object.assign(new Error('Examination name, subject, and room are required and must be 120 characters or fewer.'), { status: 400 });
+  }
+  if (notes.length > 2000) {
+    throw Object.assign(new Error('Examination notes must be 2,000 characters or fewer.'), { status: 400 });
+  }
+  return {
+    school_id: schoolId,
+    academic_year_id: academicYear.id,
+    exam_name: examName,
+    class_type: classType,
+    class_id: klass.id,
+    class_name: klass.name,
+    subject,
+    exam_date: examDate,
+    start_time: startTime,
+    end_time: endTime,
+    room,
+    notes,
+  };
+}
+
+function saveExaminationSchedule(actor, body) {
+  const member = requireMembership(actor);
+  requireStaff(member);
+  const schoolId = member.school_id;
+  return withTransaction(() => {
+    const current = body.id ? getRecord('ExaminationTimetableEntry', String(body.id)) : null;
+    if (body.id && (!current || current.school_id !== schoolId)) {
+      throw Object.assign(new Error('Examination schedule not found.'), { status: 404 });
+    }
+    if (current && current.status !== 'draft') {
+      throw Object.assign(new Error('Only draft examination schedules can be edited.'), { status: 409 });
+    }
+    const candidate = normalizeExaminationSchedule(schoolId, body.exam);
+    const existing = records('ExaminationTimetableEntry', (entry) => entry.school_id === schoolId);
+    assertNoExaminationConflicts([candidate], existing, current ? [current.id] : []);
+    const saved = current
+      ? updateRecord('ExaminationTimetableEntry', current.id, { ...candidate, status: 'draft' })
+      : createRecord('ExaminationTimetableEntry', { ...candidate, status: 'draft' });
+    audit({ ...actor, member }, {
+      action: current ? 'examination_schedule.updated' : 'examination_schedule.created',
+      entityType: 'ExaminationTimetableEntry',
+      entityId: saved.id,
+      summary: `${current ? 'Updated' : 'Created'} draft ${saved.exam_name} for ${saved.class_name}`,
+    });
+    return { entry: saved };
+  });
+}
+
+function publishExaminationSchedule(actor, body) {
+  const member = requireMembership(actor);
+  requireStaff(member);
+  const schoolId = member.school_id;
+  return withTransaction(() => {
+    const current = getRecord('ExaminationTimetableEntry', String(body.id || ''));
+    if (!current || current.school_id !== schoolId) {
+      throw Object.assign(new Error('Examination schedule not found.'), { status: 404 });
+    }
+    if (current.status !== 'draft') {
+      throw Object.assign(new Error('Only draft examination schedules can be published.'), { status: 409 });
+    }
+    const candidate = normalizeExaminationSchedule(schoolId, current);
+    const existing = records('ExaminationTimetableEntry', (entry) => entry.school_id === schoolId);
+    assertNoExaminationConflicts([candidate], existing, [current.id]);
+    const published = updateRecord('ExaminationTimetableEntry', current.id, { status: 'published' });
+    audit({ ...actor, member }, {
+      action: 'examination_schedule.published',
+      entityType: 'ExaminationTimetableEntry',
+      entityId: current.id,
+      summary: `Published ${current.exam_name} for ${current.class_name}`,
+    });
+    return { entry: published };
+  });
+}
+
+function archiveExaminationSchedule(actor, body) {
+  const member = requireMembership(actor);
+  requireStaff(member);
+  const schoolId = member.school_id;
+  return withTransaction(() => {
+    const current = getRecord('ExaminationTimetableEntry', String(body.id || ''));
+    if (!current || current.school_id !== schoolId) {
+      throw Object.assign(new Error('Examination schedule not found.'), { status: 404 });
+    }
+    if (current.status === 'archived') {
+      throw Object.assign(new Error('Examination schedule is already archived.'), { status: 409 });
+    }
+    const archived = updateRecord('ExaminationTimetableEntry', current.id, { status: 'archived' });
+    audit({ ...actor, member }, {
+      action: 'examination_schedule.archived',
+      entityType: 'ExaminationTimetableEntry',
+      entityId: current.id,
+      summary: `Archived ${current.exam_name} for ${current.class_name}`,
+    });
+    return { entry: archived };
   });
 }
 
@@ -1842,6 +2079,10 @@ export function invokeFunction(name, actor, body = {}) {
     switchSchool,
     saveTimetableEntries,
     approveGeneratedTimetable,
+    saveExaminationSchedule,
+    publishExaminationSchedule,
+    archiveExaminationSchedule,
+    manageInvigilation,
     submitAttendance,
     bulkStudentAction,
     importStudents, // Ensure this key is present and points to function importStudents

@@ -3,6 +3,7 @@ import moment from 'moment';
 import { ClipboardCheck, BookOpen, CalendarClock, GraduationCap, ArrowRight, CheckCircle2, AlertCircle } from 'lucide-react';
 import AppShell from '@/components/shell/AppShell';
 import HeroPanel from '@/components/dashboard/HeroPanel';
+import TeacherDocuments from '@/components/timetable/TeacherDocuments';
 import StatCard from '@/components/dashboard/StatCard';
 import ShortcutCards from '@/components/dashboard/ShortcutCards';
 import { useSchool } from '@/context/SchoolContext';
@@ -76,6 +77,35 @@ export default function TeacherDashboard() {
             { label: 'My timetable', to: '/timetable', icon: CalendarClock, hint: 'Lessons and rooms' },
           ]}
         />
+
+        <TeacherDocuments />
+
+        <section className="cp-card overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
+            <div>
+              <h2 className="text-base font-bold">Examination supervision</h2>
+              <p className="text-xs text-muted-foreground">Your published invigilation assignments</p>
+            </div>
+            <Link to="/timetable?view=invigilation" className="text-xs font-semibold text-primary hover:underline">Full schedule</Link>
+          </div>
+          {(data.supervisionAssignments || []).length === 0 ? (
+            <p className="px-4 py-5 text-sm text-muted-foreground">No upcoming published supervision assignments.</p>
+          ) : (
+            <div className="divide-y divide-border/60">
+              {(data.supervisionAssignments || []).slice(0, 5).map((assignment) => (
+                <div key={assignment.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold">{assignment.exam_date} · {assignment.start_time}–{assignment.end_time} · {assignment.exam_name}</p>
+                    <p className="truncate text-xs text-muted-foreground">{assignment.subject} · {assignment.room}</p>
+                  </div>
+                  <span className="rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">
+                    {assignment.role === 'chief' ? 'Chief supervisor' : 'Assistant supervisor'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
 
         <div className="grid gap-4 lg:grid-cols-5">
           <div className="cp-card lg:col-span-3">

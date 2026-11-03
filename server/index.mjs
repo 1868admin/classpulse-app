@@ -28,6 +28,7 @@ import {
 } from './database.mjs';
 import { paginate, queryRecords } from './query.mjs';
 import { invokeFunction } from './functions.mjs';
+import { documentCatalog, downloadDocument, renderBundle } from './documents.mjs';
 import { assertNoTimetableConflicts, getCurrentAcademicYearId } from './timetable.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -123,6 +124,20 @@ function ensureRecordAccess(entity, record, actor) {
     && (record.member_id !== actor.member.id || record.archived || record.published === false)) {
     throw Object.assign(new Error('Record not found'), { status: 404 });
   }
+  if (entity === 'ExaminationTimetableEntry' && actor.member?.role === 'teacher'
+    && record.status !== 'published') {
+    throw Object.assign(new Error('Record not found'), { status: 404 });
+  }
+  if (entity === 'InvigilationAssignment' && actor.member?.role === 'teacher') {
+    const exam = getRecord('ExaminationTimetableEntry', record.examination_id);
+    if (record.teacher_member_id !== actor.member.id || record.status !== 'published'
+      || exam?.status !== 'published') {
+      throw Object.assign(new Error('Record not found'), { status: 404 });
+    }
+  }
+  if (entity === 'InvigilationRequirement' && actor.member?.role === 'teacher') {
+    throw Object.assign(new Error('Record not found'), { status: 404 });
+  }
   const allowed = entity === 'School'
     ? record.id === actor.schoolId
     : !!actor.schoolId && record.school_id === actor.schoolId;
@@ -158,15 +173,26 @@ function ensureWritePermission(entity, record, actor, operation) {
     && !['school_admin', 'it_admin'].includes(actor.member?.role)) {
     throw Object.assign(new Error('Only school administrators and IT administrators can manage timetable entries.'), { status: 403 });
   }
+  if (entity === 'ExaminationTimetableEntry') {
+    throw Object.assign(new Error('Examination schedules can only be changed through examination management workflows.'), { status: 403 });
+  }
+  if (['InvigilationAssignment', 'InvigilationRequirement'].includes(entity)) {
+    throw Object.assign(new Error('Invigilation records can only be changed through invigilation management workflows.'), { status: 403 });
+  }
   if (entity === 'AcademicYear' && operation === 'delete') {
     const isCurrentYear = getCurrentAcademicYearId(record.school_id) === record.id;
     const hasRelatedTimetableData = getRecords('TimetableEntry').some((item) =>
       item.school_id === record.school_id
       && (item.academic_year_id === record.id || (isCurrentYear && !item.academic_year_id)))
       || getRecords('TeacherAvailability').some((item) =>
-        item.school_id === record.school_id && item.academic_year_id === record.id);
+        item.school_id === record.school_id && item.academic_year_id === record.id)
+      || getRecords('ExaminationTimetableEntry').some((item) =>
+        item.school_id === record.school_id && item.academic_year_id === record.id)
+      || ['InvigilationAssignment', 'InvigilationRequirement'].some((entity) =>
+        getRecords(entity).some((item) =>
+          item.school_id === record.school_id && item.academic_year_id === record.id));
     if (hasRelatedTimetableData) {
-      throw Object.assign(new Error('An academic year with timetable or teacher availability records cannot be deleted.'), { status: 409 });
+      throw Object.assign(new Error('An academic year with timetable, teacher availability, examination, or invigilation records cannot be deleted.'), { status: 409 });
     }
   }
   if (entity === 'Student' && operation === 'create') {
@@ -458,6 +484,39 @@ async function handleFunction(request, response, parts) {
   return true;
 }
 
+function sendFile(response, document, { contentType, inline }) {
+  response.writeHead(200, {
+    'Cache-Control': 'no-store, private',
+    'Content-Type': contentType,
+    'Content-Length': document.buffer.length,
+    'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename="${document.filename}"`,
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'same-origin',
+  });
+  response.end(document.buffer);
+}
+
+async function handleDocuments(request, response, url, parts) {
+  const actor = requireActor(getActor(request));
+  const action = parts[2];
+  if (action === 'catalog' && request.method === 'GET') {
+    respond(response, 200, documentCatalog(actor, url.searchParams.get('academic_year_id') || ''));
+    return true;
+  }
+  if (action === 'pdf' && request.method === 'GET') {
+    const inline = url.searchParams.get('disposition') === 'inline';
+    const document = downloadDocument(actor, Object.fromEntries(url.searchParams), { preview: inline });
+    sendFile(response, document, { contentType: 'application/pdf', inline });
+    return true;
+  }
+  if (action === 'zip' && request.method === 'POST') {
+    const document = renderBundle(actor, await readJson(request));
+    sendFile(response, document, { contentType: 'application/zip', inline: false });
+    return true;
+  }
+  return false;
+}
+
 function serveFile(request, response, pathname) {
   if (!existsSync(distDirectory)) return false;
   const relativePath = pathname === '/' ? 'index.html' : decodeURIComponent(pathname.slice(1));
@@ -494,6 +553,7 @@ async function handleRequestCore(request, response) {
     }
     if (parts[0] === 'api' && parts[1] === 'auth' && await handleAuth(request, response, parts)) return;
     if (parts[0] === 'api' && parts[1] === 'entities' && await handleEntity(request, response, parts)) return;
+    if (parts[0] === 'api' && parts[1] === 'documents' && await handleDocuments(request, response, url, parts)) return;
     if (parts[0] === 'api' && parts[1] === 'functions' && await handleFunction(request, response, parts)) return;
     if (parts[0] === 'api') {
       respond(response, 404, { error: 'API route not found' });

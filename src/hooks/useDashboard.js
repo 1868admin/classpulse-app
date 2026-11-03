@@ -215,17 +215,22 @@ export function useTeacherDashboard(schoolId, memberId) {
   const [data, setData] = useState({
     loading: true, classLinks: [], entries: [], todayEntries: [], sessions: [], calendar: null,
     dayName: '', homeroomCount: 0, subjectCount: 0, studentTotal: 0, submittedToday: 0, outstanding: 0,
+    supervisionAssignments: [],
   });
   const today = todayStr();
 
   const load = useCallback(async () => {
     if (!schoolId || !memberId) return;
     setData((current) => ({ ...current, loading: true }));
-    const [links, entries, sessions, calendar] = await Promise.all([
+    const [links, entries, sessions, calendar, supervision] = await Promise.all([
       base44.entities.ClassTeacher.filter({ school_id: schoolId, member_id: memberId }, { limit: 200 }),
       base44.entities.TimetableEntry.filter({ school_id: schoolId, member_id: memberId, archived: false }, { limit: 200 }),
       base44.entities.AttendanceSession.filter({ school_id: schoolId, date: today, member_id: memberId }, { limit: 100 }),
       base44.entities.CalendarDate.filter({ school_id: schoolId, date: today }, { limit: 1 }),
+      base44.entities.InvigilationAssignment.filter(
+        { school_id: schoolId, teacher_member_id: memberId, status: 'published', exam_date: { $gte: today } },
+        { limit: 100, sort: ['exam_date', 'start_time'] },
+      ),
     ]);
     const classLinks = links.items || [];
     const todaySessions = sessions.items || [];
@@ -299,6 +304,7 @@ export function useTeacherDashboard(schoolId, memberId) {
       studentTotal,
       submittedToday: todaySessions.length,
       outstanding: Math.max(0, todayEntries.length - todaySessions.length),
+      supervisionAssignments: supervision.items || [],
       hasNoSchool: calendarToday?.day_type === 'no_school',
       calendarMissing: !calendarToday,
     });

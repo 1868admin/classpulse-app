@@ -6,6 +6,10 @@ import { useSchool } from '@/context/SchoolContext';
 import AppShell from '@/components/shell/AppShell';
 import PageHeader from '@/components/ui-bits/PageHeader';
 import EntryDialog from '@/components/timetable/EntryDialog';
+import DocumentCentre from '@/components/timetable/DocumentCentre';
+import TeacherDocuments from '@/components/timetable/TeacherDocuments';
+import ExaminationTimetable from '@/components/timetable/ExaminationTimetable';
+import InvigilationManagement from '@/components/timetable/InvigilationManagement';
 import TimetableGenerator from '@/components/timetable/TimetableGenerator';
 import TimetableUploadDialog from '@/components/timetable/TimetableUploadDialog';
 import { Button } from '@/components/ui/button';
@@ -20,6 +24,9 @@ const MANAGEMENT_VIEWS = [
   { id: 'rooms', label: 'Room Timetables' },
   { id: 'import', label: 'Import Timetable' },
   { id: 'generate', label: 'Generate Timetable' },
+  { id: 'examinations', label: 'Examination Timetable' },
+  { id: 'invigilation', label: 'Invigilation Management' },
+  { id: 'documents', label: 'PDF Distribution Centre' },
 ];
 
 function EntryTable({ entries, getTeacherName }) {
@@ -69,6 +76,8 @@ export default function Timetable() {
   const requestedView = params.get('view');
   const activeView = isStaff && MANAGEMENT_VIEWS.some((view) => view.id === requestedView)
     ? requestedView
+    : !isStaff && ['examinations', 'invigilation'].includes(requestedView)
+      ? requestedView
     : isStaff ? 'master' : 'teachers';
 
   const days = school?.day_names || ['Day 1', 'Day 2', 'Day 3', 'Day 4', 'Day 5'];
@@ -164,8 +173,20 @@ export default function Timetable() {
   }, [teacherEntries]);
   const targetName = isStaff ? getTeacherName(targetId) : member?.full_name || '';
 
-  const headerTitle = isStaff ? 'Timetable Management' : 'My Published Timetable';
-  const headerSubtitle = isStaff
+  const headerTitle = activeView === 'examinations'
+    ? 'Examination Timetable'
+    : activeView === 'documents'
+      ? 'PDF Distribution Centre'
+    : activeView === 'invigilation'
+      ? (isStaff ? 'Invigilation Management' : 'My Examination Supervision')
+    : isStaff ? 'Timetable Management' : 'My Published Timetable';
+  const headerSubtitle = activeView === 'examinations'
+    ? 'Published examination schedules'
+    : activeView === 'documents'
+      ? 'Generate, preview and distribute timetable and supervision PDFs'
+    : activeView === 'invigilation'
+      ? (isStaff ? 'Allocate and manage examination supervisors' : 'Your published supervision assignments')
+    : isStaff
     ? (academicYears.find((year) => year.id === academicYearId)?.name || 'Manage school timetables')
     : `${targetName} · ${teacherEntries.length} published lesson(s)`;
 
@@ -174,7 +195,7 @@ export default function Timetable() {
       <PageHeader
         title={headerTitle}
         subtitle={headerSubtitle}
-        actions={activeView !== 'generate' && activeView !== 'import' ? (
+        actions={activeView !== 'generate' && activeView !== 'import' && activeView !== 'examinations' && activeView !== 'invigilation' && activeView !== 'documents' ? (
           <>
             <Button variant="outline" size="sm" onClick={() => window.print()}><Printer className="mr-1.5 h-3.5 w-3.5" />Print</Button>
             {isStaff && activeView === 'teachers' && (
@@ -209,8 +230,64 @@ export default function Timetable() {
           ))}
         </nav>
       )}
+      {!isStaff && (
+        <nav className="mb-4 flex gap-1 rounded-xl border border-border bg-card p-1" role="tablist" aria-label="Timetables">
+          <Button
+            type="button"
+            size="sm"
+            variant={activeView === 'teachers' ? 'default' : 'ghost'}
+            role="tab"
+            aria-selected={activeView === 'teachers'}
+            onClick={() => setView('teachers')}
+          >
+            My Published Timetable
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={activeView === 'examinations' ? 'default' : 'ghost'}
+            role="tab"
+            aria-selected={activeView === 'examinations'}
+            onClick={() => setView('examinations')}
+          >
+            Examination Timetable
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={activeView === 'invigilation' ? 'default' : 'ghost'}
+            role="tab"
+            aria-selected={activeView === 'invigilation'}
+            onClick={() => setView('invigilation')}
+          >
+            Examination Supervision
+          </Button>
+        </nav>
+      )}
 
-      {isStaff && activeView === 'generate' ? (
+      {activeView === 'documents' && isStaff ? (
+        <DocumentCentre
+          academicYears={academicYears}
+          academicYearId={academicYearId}
+          onAcademicYearChange={setAcademicYearId}
+        />
+      ) : activeView === 'invigilation' ? (
+        <InvigilationManagement
+          schoolId={schoolId}
+          isStaff={isStaff}
+          academicYears={academicYears}
+          academicYearId={academicYearId}
+          onAcademicYearChange={setAcademicYearId}
+        />
+      ) : activeView === 'examinations' ? (
+        <ExaminationTimetable
+          schoolId={schoolId}
+          isStaff={isStaff}
+          academicYears={academicYears}
+          academicYearId={academicYearId}
+          onAcademicYearChange={setAcademicYearId}
+        />
+      ) : isStaff && activeView === 'generate' ? (
         <TimetableGenerator
           schoolId={schoolId}
           school={school}
@@ -270,7 +347,8 @@ export default function Timetable() {
         </div>
       ) : null}
 
-      {isStaff && activeView !== 'generate' && activeView !== 'import' && academicYears.length > 0 && (
+      {isStaff && activeView !== 'generate' && activeView !== 'import' && activeView !== 'examinations'
+        && activeView !== 'invigilation' && activeView !== 'documents' && academicYears.length > 0 && (
         <div className="mb-3 max-w-sm">
           <Select value={academicYearId} onValueChange={setAcademicYearId}>
             <SelectTrigger><SelectValue placeholder="Choose an academic year" /></SelectTrigger>
@@ -279,7 +357,9 @@ export default function Timetable() {
         </div>
       )}
 
-      {activeView === 'generate' && isStaff ? null : activeView === 'teachers' ? (
+      {!isStaff && ['teachers', 'invigilation'].includes(activeView) && <div className="mb-4"><TeacherDocuments /></div>}
+
+      {(activeView === 'generate' && isStaff) || (activeView === 'documents' && isStaff) ? null : activeView === 'teachers' ? (
         !targetId ? (
           <p className="text-sm text-muted-foreground">Choose a teacher to view their timetable.</p>
         ) : (

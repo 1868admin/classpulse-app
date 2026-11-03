@@ -61,6 +61,18 @@ export function getAccessibleRecords(entity, actor) {
     return visible.filter((entry) => entry.member_id === actor.member.id
       && !entry.archived && entry.published !== false);
   }
+  if (entity === 'ExaminationTimetableEntry' && actor.member?.role === 'teacher') {
+    return visible.filter((entry) => entry.status === 'published');
+  }
+  if (entity === 'InvigilationAssignment' && actor.member?.role === 'teacher') {
+    const publishedExaminations = new Set(getRecords('ExaminationTimetableEntry')
+      .filter((entry) => entry.school_id === actor.schoolId && entry.status === 'published')
+      .map((entry) => entry.id));
+    return visible.filter((assignment) => assignment.teacher_member_id === actor.member.id
+      && assignment.status === 'published'
+      && publishedExaminations.has(assignment.examination_id));
+  }
+  if (entity === 'InvigilationRequirement' && actor.member?.role === 'teacher') return [];
   if (['AttendanceRecord', 'AttendanceSession'].includes(entity) && actor.member?.role === 'teacher') {
     const assignedClasses = new Set(getRecords('ClassTeacher')
       .filter((link) => link.school_id === actor.schoolId && link.member_id === actor.member.id)

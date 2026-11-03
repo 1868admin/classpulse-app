@@ -1,0 +1,49 @@
+{
+  "name": "InvigilationAssignment",
+  "type": "object",
+  "properties": {
+    "school_id": { "type": "string" },
+    "academic_year_id": { "type": "string" },
+    "examination_id": { "type": "string" },
+    "teacher_member_id": { "type": "string" },
+    "teacher_name": { "type": "string" },
+    "exam_name": { "type": "string" },
+    "exam_date": { "type": "string" },
+    "start_time": { "type": "string" },
+    "end_time": { "type": "string" },
+    "room": { "type": "string" },
+    "subject": { "type": "string" },
+    "role": { "type": "string", "enum": ["chief", "assistant"] },
+    "status": { "type": "string", "enum": ["draft", "published", "removed", "superseded"] },
+    "source": { "type": "string", "enum": ["automatic", "manual"] },
+    "confirmed": { "type": "boolean", "default": false },
+    "required_supervisors": { "type": "number", "default": 2 },
+    "subject_teacher_warning": { "type": "boolean", "default": false },
+    "override_reason": { "type": "string" },
+    "override_by": { "type": "string" },
+    "override_at": { "type": "string" },
+    "removal_reason": { "type": "string" },
+    "created_by": { "type": "string" },
+    "updated_at": { "type": "string" }
+  },
+  "required": [
+    "school_id",
+    "academic_year_id",
+    "examination_id",
+    "teacher_member_id",
+    "exam_name",
+    "exam_date",
+    "start_time",
+    "end_time",
+    "room",
+    "subject",
+    "role",
+    "status"
+  ],
+  "rls": {
+    "read": { "data.school_id": "{{user.data.school_id}}" },
+    "create": { "data.school_id": "{{user.data.school_id}}" },
+    "update": { "data.school_id": "{{user.data.school_id}}" },
+    "delete": { "data.school_id": "{{user.data.school_id}}" }
+  }
+}

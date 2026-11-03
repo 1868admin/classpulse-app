@@ -26,6 +26,7 @@ export const NAV_SECTIONS = [
       { label: 'Subject classes', path: '/subject-classes', icon: BookOpen, roles: ['school_admin', 'it_admin', 'teacher'] },
       { label: 'Timetable Management', path: '/timetable', icon: CalendarClock, roles: ['school_admin', 'it_admin'] },
       { label: 'My timetable', path: '/timetable', icon: CalendarClock, roles: ['teacher'] },
+      { label: 'Examination supervision', path: '/timetable?view=invigilation', icon: CalendarClock, roles: ['school_admin', 'it_admin', 'teacher'] },
       { label: 'Attendance', path: '/attendance', icon: ClipboardCheck, roles: ['school_admin', 'it_admin', 'teacher'] },
       { label: 'School calendar', path: '/calendar', icon: CalendarDays, roles: ['school_admin', 'it_admin', 'teacher'] },
     ],
