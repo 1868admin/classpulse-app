@@ -27,7 +27,10 @@ export default function BulkMarkDialog({ open, onOpenChange, onSaved }) {
   const [status, setStatus] = useState('present');
   const [overwrite, setOverwrite] = useState(false);
   const [data, setData] = useState(null);
-  const [overrides, setOverrides] = useState({});
+  const [selected, setSelected] = useState(() => new Set());
+  const [statuses, setStatuses] = useState({});
+  const [search, setSearch] = useState('');
+  const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
 
@@ -35,7 +38,7 @@ export default function BulkMarkDialog({ open, onOpenChange, onSaved }) {
   const sessions = SESSION_CHOICES.find((item) => item.value === sessionChoice).sessions;
   const dates = useMemo(() => (data?.dates || []).filter((item) => !item.skipped), [data]);
 
-  const reset = () => { setData(null); setOverrides({}); setError(''); setOverwrite(false); };
+  const reset = () => { setData(null); setSelected(new Set()); setStatuses({}); setSearch(''); setPreview(null); setError(''); setOverwrite(false); };
   const close = (next) => { if (busy) return; if (!next) reset(); onOpenChange(next); };
 
   const loadStudents = async () => {
@@ -45,26 +48,65 @@ export default function BulkMarkDialog({ open, onOpenChange, onSaved }) {
       if (!result.students.length) throw new Error('This class has no students.');
       if (!result.dates.some((item) => !item.skipped)) throw new Error('No school days fall inside the selected dates.');
       setData(result);
-      setOverrides({});
+      setSelected(new Set());
+      setStatuses({});
+      setPreview(null);
+    } catch (err) { setError(err.response?.data?.error || err.message); } finally { setBusy(''); }
+  };
+
+  const statusOf = (student) => statuses[student.id] || status;
+  const selectedStudents = useMemo(() => (data?.students || []).filter((student) => selected.has(student.id)), [data, selected]);
+  const visibleStudents = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return data?.students || [];
+    return (data?.students || []).filter((student) =>
+      `${student.first_name} ${student.surname} ${student.surname} ${student.first_name} ${student.student_id_no}`.toLowerCase().includes(term));
+  }, [data, search]);
+
+  const change = (fn) => { setPreview(null); fn(); };
+  const toggle = (id, checked) => change(() => setSelected((current) => {
+    const next = new Set(current);
+    if (checked) next.add(id); else next.delete(id);
+    return next;
+  }));
+  const selectAll = () => change(() => setSelected(new Set(data.students.map((student) => student.id))));
+  const deselectAll = () => change(() => setSelected(new Set()));
+  const applyToSelected = () => change(() => setStatuses((current) => {
+    const next = { ...current };
+    for (const id of selected) next[id] = status;
+    return next;
+  }));
+
+  const buildCells = () => {
+    const cells = [];
+    let row = 0;
+    for (const item of dates) {
+      for (const session of sessions) {
+        for (const student of selectedStudents) {
+          row += 1;
+          cells.push({ row, student_id_no: student.student_id_no, date: item.date, session, status: statusOf(student) });
+        }
+      }
+    }
+    return cells;
+  };
+  const payload = (extra) => ({
+    class_type: classType, class_id: classId, academic_year: data.academic_year.name, cells: buildCells(), overwrite, ...extra,
+  });
+
+  const review = async () => {
+    setBusy('review'); setError('');
+    try {
+      const result = await call({ action: 'preview', ...payload({ overwrite: undefined }) });
+      setPreview(result);
     } catch (err) { setError(err.response?.data?.error || err.message); } finally { setBusy(''); }
   };
 
   const apply = async () => {
     setBusy('save'); setError('');
     try {
-      const cells = [];
-      let row = 0;
-      for (const item of dates) {
-        for (const session of sessions) {
-          for (const student of data.students) {
-            row += 1;
-            cells.push({ row, student_id_no: student.student_id_no, date: item.date, session, status: overrides[student.id] || status });
-          }
-        }
-      }
       const result = await call({
-        action: 'commit', source: 'bulk_mark', class_type: classType, class_id: classId, academic_year: data.academic_year.name,
-        cells, overwrite, file_name: 'Bulk mark',
+        action: 'commit', source: 'bulk_mark', ...payload(), fingerprint: preview.fingerprint, file_name: 'Bulk mark',
       });
       notifySuccess('Attendance saved', `${result.created} added · ${result.updated} updated · ${result.unchanged + result.skipped_existing} existing preserved.`);
       onSaved?.();
@@ -72,18 +114,22 @@ export default function BulkMarkDialog({ open, onOpenChange, onSaved }) {
     } catch (err) {
       const message = err.response?.data?.error || err.message;
       setError(message);
+      setPreview(null);
       notifyError('Attendance was not saved', message);
     } finally { setBusy(''); }
   };
 
-  const adjusted = Object.keys(overrides).length;
+  const summary = preview?.summary;
+  const updating = summary ? (overwrite ? summary.updates : 0) : 0;
+  const preservedRecords = summary ? summary.unchanged + (overwrite ? 0 : summary.updates) : 0;
+  const unselectedCount = (data?.students.length || 0) - selected.size;
 
   return (
     <Dialog open={open} onOpenChange={close}>
       <DialogContent className="max-h-[92vh] w-[calc(100vw-1rem)] overflow-y-auto p-4 sm:max-w-3xl sm:p-6">
         <DialogHeader>
           <DialogTitle>Bulk-mark class attendance</DialogTitle>
-          <DialogDescription>Apply one status to every student for a date or date range, then adjust individual students before saving.</DialogDescription>
+          <DialogDescription>Select students, apply a status to only those students, adjust individuals, then review and confirm. Unselected students are never changed.</DialogDescription>
         </DialogHeader>
         {(error || loadError) && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 p-2.5 text-sm text-destructive">{error || loadError}</p>}
 
@@ -96,13 +142,13 @@ export default function BulkMarkDialog({ open, onOpenChange, onSaved }) {
           <div><Label className="mb-1 block text-xs">To</Label><Input type="date" value={end} min={start} onChange={(event) => { setEnd(event.target.value); reset(); }} /></div>
           <div>
             <Label className="mb-1 block text-xs">Sessions</Label>
-            <select className={selectClass} value={sessionChoice} onChange={(event) => setSessionChoice(event.target.value)} aria-label="Sessions">
+            <select className={selectClass} value={sessionChoice} onChange={(event) => change(() => setSessionChoice(event.target.value))} aria-label="Sessions">
               {SESSION_CHOICES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
             </select>
           </div>
           <div>
-            <Label className="mb-1 block text-xs">Status for all students</Label>
-            <select className={selectClass} value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Status">
+            <Label className="mb-1 block text-xs">Status to apply</Label>
+            <select className={selectClass} value={status} onChange={(event) => change(() => setStatus(event.target.value))} aria-label="Status">
               {ATTENDANCE_STATUSES.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
             </select>
           </div>
@@ -121,46 +167,67 @@ export default function BulkMarkDialog({ open, onOpenChange, onSaved }) {
               {data.class.name} · {data.academic_year.name} · {data.students.length} students · {dates.length} school day(s) × {sessions.join(' + ')}
               {data.dates.some((item) => item.skipped) && ' · weekends and no-school days are skipped'}
             </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name or Student ID" aria-label="Search students" className="h-8 max-w-xs" />
+              <Button type="button" size="sm" variant="outline" onClick={selectAll}>Select all</Button>
+              <Button type="button" size="sm" variant="outline" onClick={deselectAll}>Deselect all</Button>
+              <Button type="button" size="sm" onClick={applyToSelected} disabled={!selected.size}>Apply {ATTENDANCE_STATUSES.find((item) => item.key === status)?.label} to selected</Button>
+              <span className="text-xs text-muted-foreground" aria-live="polite">{selected.size} of {data.students.length} selected</span>
+            </div>
             <div className="max-h-64 overflow-auto rounded-lg border border-border">
-              <table className="w-full min-w-[420px] text-left text-xs">
-                <thead className="cp-table-head"><tr><th className="p-2">Student ID</th><th className="p-2">Name</th><th className="p-2">Status</th></tr></thead>
+              <table className="w-full min-w-[480px] text-left text-xs">
+                <thead className="cp-table-head"><tr><th className="w-8 p-2" /><th className="p-2">Student ID</th><th className="p-2">Name</th><th className="p-2">Status to save</th></tr></thead>
                 <tbody>
-                  {data.students.map((student) => (
-                    <tr key={student.id} className="border-t border-border/60">
-                      <td className="p-2">{student.student_id_no}</td>
-                      <td className="p-2">{student.first_name} {student.surname}</td>
-                      <td className="p-2">
-                        <select
-                          className={`${selectClass} h-8 max-w-[10rem] py-0`}
-                          value={overrides[student.id] || status}
-                          aria-label={`Status for ${student.first_name} ${student.surname}`}
-                          onChange={(event) => setOverrides((current) => {
-                            const next = { ...current };
-                            if (event.target.value === status) delete next[student.id]; else next[student.id] = event.target.value;
-                            return next;
-                          })}
-                        >
-                          {ATTENDANCE_STATUSES.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
-                        </select>
-                      </td>
-                    </tr>
-                  ))}
+                  {visibleStudents.map((student) => {
+                    const checked = selected.has(student.id);
+                    return (
+                      <tr key={student.id} className="border-t border-border/60">
+                        <td className="p-2"><Checkbox checked={checked} onCheckedChange={(value) => toggle(student.id, value === true)} aria-label={`Select ${student.first_name} ${student.surname}`} /></td>
+                        <td className="p-2">{student.student_id_no}</td>
+                        <td className="p-2">{student.first_name} {student.surname}</td>
+                        <td className="p-2">
+                          {checked ? (
+                            <select
+                              className={`${selectClass} h-8 max-w-[10rem] py-0`}
+                              value={statusOf(student)}
+                              aria-label={`Status for ${student.first_name} ${student.surname}`}
+                              onChange={(event) => change(() => setStatuses((current) => ({ ...current, [student.id]: event.target.value })))}
+                            >
+                              {ATTENDANCE_STATUSES.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
+                            </select>
+                          ) : <span className="text-muted-foreground">Unchanged</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {!visibleStudents.length && <tr><td colSpan={4} className="p-3 text-center text-muted-foreground">No students match your search.</td></tr>}
                 </tbody>
               </table>
             </div>
             <label className="flex items-start gap-2 rounded-lg bg-muted/40 p-3 text-sm">
-              <Checkbox checked={overwrite} onCheckedChange={(value) => setOverwrite(value === true)} className="mt-0.5" />
+              <Checkbox checked={overwrite} onCheckedChange={(value) => change(() => setOverwrite(value === true))} className="mt-0.5" />
               <span>Overwrite existing attendance for these dates
                 <span className="block text-xs text-muted-foreground">Unticked, registers that already have a record for a student are preserved and only missing records are added. AM and PM are saved separately.</span>
               </span>
             </label>
-            {adjusted > 0 && <p className="text-xs text-muted-foreground">{adjusted} student(s) adjusted individually.</p>}
+            {summary && (
+              <div className="space-y-1 rounded-lg border border-border bg-muted/30 p-3 text-sm" role="status">
+                <p className="font-medium">Review before saving</p>
+                <p>Students selected: {selected.size}</p>
+                <p>Attendance records to create: {summary.created}</p>
+                <p>Existing records to update: {updating}</p>
+                <p>Students left unchanged: {unselectedCount}</p>
+                <p>Existing records left unchanged: {preservedRecords}</p>
+                {summary.invalid > 0 && <p className="text-destructive">{summary.invalid} entries are invalid and will block saving.</p>}
+              </div>
+            )}
           </section>
         )}
 
         <DialogFooter className="gap-2 sm:gap-2">
           <Button type="button" variant="outline" onClick={() => close(false)} disabled={!!busy}>Cancel</Button>
-          {data && <Button type="button" onClick={apply} disabled={!!busy}>{busy === 'save' ? 'Saving…' : 'Save attendance'}</Button>}
+          {data && !preview && <Button type="button" onClick={review} disabled={!!busy || !selected.size || !dates.length}>{busy === 'review' ? 'Checking…' : 'Review changes'}</Button>}
+          {data && preview && <Button type="button" onClick={apply} disabled={!!busy || summary.invalid > 0}>{busy === 'save' ? 'Saving…' : 'Confirm and save'}</Button>}
         </DialogFooter>
       </DialogContent>
     </Dialog>

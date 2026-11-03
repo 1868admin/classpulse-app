@@ -155,6 +155,32 @@ test('bulk attendance, teacher and subject class imports', async () => {
     assert.equal(subjPreview.data.summary.invalid, 1);
     assert.equal((await pv(otherCookie, subjBody)).status, 403);
 
+    // bulk mark: only the selected students, dates and sessions are written
+    const cyStudent = students.find((s) => s.first_name === 'Cy');
+    const benStudent = students.find((s) => s.first_name === 'Ben');
+    const allRecords = async () => (await batch([{ entity: 'AttendanceRecord', query: { school_id: school.id }, options: { limit: 500 } }]))[0].items;
+    const seed = await admin('bulkAttendance', { action: 'commit', ...body([cell(1, ids.Cy, '2026-09-03', 'AM', 'Late'), cell(2, ids.Cy, '2026-09-03', 'PM', 'Excused')]) });
+    assert.equal(seed.data.created, 2);
+    const selectedOnly = (status, sessionsList, dateList, who = [ids.Ann, ids.Ben]) => who.flatMap((id) => dateList.flatMap((d) => sessionsList.map((session) => cell(1, id, d, session, status))));
+    const markPreview = await admin('bulkAttendance', { action: 'preview', ...body(selectedOnly('Absent', ['AM'], ['2026-09-03', '2026-09-04'])) });
+    assert.equal(markPreview.data.summary.valid, 4);
+    const marked = await admin('bulkAttendance', { action: 'commit', source: 'bulk_mark', ...body(selectedOnly('Absent', ['AM'], ['2026-09-03', '2026-09-04'])), fingerprint: markPreview.data.fingerprint });
+    assert.equal(marked.status, 200, JSON.stringify(marked.data));
+    const afterMark = await allRecords();
+    const forStudent = (id, date) => afterMark.filter((r) => r.student_id === id && r.date === date);
+    // Cy was unselected: records identical, no new ones
+    assert.deepEqual(afterMark.filter((r) => r.student_id === cyStudent.id && r.date === '2026-09-03').map((r) => r.status).sort(), ['excused', 'late']);
+    // AM only: Ben has an AM record on both dates and nothing for PM
+    assert.equal(forStudent(benStudent.id, '2026-09-03').length, 1);
+    assert.equal(forStudent(benStudent.id, '2026-09-04').length, 1);
+    assert.equal(forStudent(benStudent.id, '2026-09-03')[0].status, 'absent');
+    // PM-only apply leaves Ann's AM untouched
+    await admin('bulkAttendance', { action: 'commit', source: 'bulk_mark', ...body(selectedOnly('Present', ['PM'], ['2026-09-04'], [ids.Ann])) });
+    const afterPm = await allRecords();
+    assert.equal(afterPm.filter((r) => r.student_id === ann.id && r.date === '2026-09-04').length, 2);
+    assert.equal(afterPm.filter((r) => r.student_id === benStudent.id && r.date === '2026-09-04').length, 1);
+    assert.equal(afterPm.length, afterMark.length + 1);
+
     // existing submitAttendance still works for the homeroom
     const submit = await as(homeCookie)('submitAttendance', {
       class_type: 'homeroom', class_id: homeroom.id, date: '2026-09-10', session_label: 'Morning',
