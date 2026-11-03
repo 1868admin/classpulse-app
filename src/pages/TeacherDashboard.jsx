@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import moment from 'moment';
-import { ClipboardCheck, BookOpen, CalendarClock, UploadCloud, GraduationCap, ArrowRight, CheckCircle2, AlertCircle } from 'lucide-react';
+import { ClipboardCheck, BookOpen, CalendarClock, GraduationCap, ArrowRight, CheckCircle2, AlertCircle } from 'lucide-react';
 import AppShell from '@/components/shell/AppShell';
 import HeroPanel from '@/components/dashboard/HeroPanel';
 import StatCard from '@/components/dashboard/StatCard';
@@ -74,7 +74,6 @@ export default function TeacherDashboard() {
             { label: 'Take attendance', to: '/attendance', icon: ClipboardCheck, hint: 'Open today\'s registers' },
             { label: 'My classes', to: '/subject-classes', icon: BookOpen, hint: 'Manage class lists' },
             { label: 'My timetable', to: '/timetable', icon: CalendarClock, hint: 'Lessons and rooms' },
-            { label: 'Upload timetable', to: '/timetable?upload=1', icon: UploadCloud, hint: 'Import from CSV' },
           ]}
         />
 

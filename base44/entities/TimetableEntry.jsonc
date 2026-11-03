@@ -44,6 +44,10 @@
     "notes": {
       "type": "string"
     },
+    "published": {
+      "type": "boolean",
+      "default": true
+    },
     "archived": {
       "type": "boolean",
       "default": false

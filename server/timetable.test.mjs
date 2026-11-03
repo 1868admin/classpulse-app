@@ -110,6 +110,21 @@ test('timetable writes reject teacher, class, room and overlapping-time conflict
     });
     assert.equal(unavailable.status, 201);
 
+    const lesson = (memberId, overrides = {}) => ({
+      school_id: school.id,
+      member_id: memberId,
+      academic_year_id: academicYearId,
+      day_name: 'Day 1',
+      period_number: 1,
+      start_time: '08:30',
+      end_time: '09:20',
+      subject: 'Mathematics',
+      class_name: 'Form 1A',
+      subject_class_id: 'class-a',
+      room: 'Room 1',
+      ...overrides,
+    });
+
     const teacherLogin = await call('/api/auth/login', 'POST', {
       username: 'tina.teacher',
       password: 'teacher-test-password',
@@ -133,20 +148,13 @@ test('timetable writes reject teacher, class, room and overlapping-time conflict
       is_available: false,
     });
     assert.equal(otherTeacherAvailability.status, 403, "teachers cannot change a colleague's availability");
-    const lesson = (memberId, overrides = {}) => ({
-      school_id: school.id,
-      member_id: memberId,
-      academic_year_id: academicYearId,
-      day_name: 'Day 1',
-      period_number: 1,
-      start_time: '08:30',
-      end_time: '09:20',
-      subject: 'Mathematics',
-      class_name: 'Form 1A',
-      subject_class_id: 'class-a',
-      room: 'Room 1',
-      ...overrides,
-    });
+    const teacherWrite = await callAs(teacherCookie, '/api/entities/TimetableEntry', 'POST', lesson(teacherA.id, {
+      day_name: 'Day 5',
+      period_number: 6,
+      subject_class_id: 'teacher-added-class',
+      class_name: 'Form 5A',
+    }));
+    assert.equal(teacherWrite.status, 403, 'teachers cannot publish their own timetable entries');
 
     const first = await call('/api/entities/TimetableEntry', 'POST', lesson(teacherA.id));
     assert.equal(first.status, 201);
@@ -198,6 +206,49 @@ test('timetable writes reject teacher, class, room and overlapping-time conflict
     }));
     assert.equal(invalidAcademicYear.status, 400);
     assert.equal((await call(`/api/entities/AcademicYear/${academicYearId}`, 'DELETE')).status, 409);
+
+    const generatedClass = await call('/api/entities/SubjectClass', 'POST', {
+      school_id: school.id,
+      name: 'Form 5A Computing',
+      subject: 'Computing',
+      room: 'Lab 1',
+      archived: false,
+    });
+    const unauthorizedApproval = await callAs(teacherCookie, '/api/functions/approveGeneratedTimetable', 'POST', {
+      academic_year_id: academicYearId,
+      mode: 'merge',
+      entries: [],
+    });
+    assert.equal(unauthorizedApproval.status, 403);
+    const approvedDraft = await fn('approveGeneratedTimetable', {
+      academic_year_id: academicYearId,
+      mode: 'merge',
+      entries: [{
+        member_id: teacherA.id,
+        subject_class_id: generatedClass.data.id,
+        day_name: 'Day 5',
+        period_number: 6,
+        start_time: '14:00',
+        end_time: '14:50',
+      }],
+    });
+    assert.equal(approvedDraft.status, 200);
+    const unpublishedEntry = await call('/api/entities/TimetableEntry', 'POST', lesson(teacherA.id, {
+      day_name: 'Day 4',
+      period_number: 5,
+      published: false,
+      subject_class_id: 'unpublished-class',
+      class_name: 'Private draft',
+      room: '',
+    }));
+    assert.equal(unpublishedEntry.status, 201);
+    const publishedEntries = await callAs(teacherCookie, '/api/entities/TimetableEntry/filter', 'POST', {
+      query: { school_id: school.id },
+    });
+    assert.ok(publishedEntries.data.items.some((entry) => entry.published === true));
+    assert.ok(publishedEntries.data.items.every((entry) => entry.member_id === teacherA.id && entry.published !== false));
+    assert.equal(publishedEntries.data.items.some((entry) => entry.id === unpublishedEntry.data.id), false);
+    assert.equal((await callAs(teacherCookie, `/api/entities/TimetableEntry/${unpublishedEntry.data.id}`)).status, 404);
 
     const teacherConflict = await call('/api/entities/TimetableEntry', 'POST', lesson(teacherA.id, {
       period_number: 2,

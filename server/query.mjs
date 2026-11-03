@@ -57,6 +57,10 @@ export function getAccessibleRecords(entity, actor) {
       : rows.filter((record) => entity === 'School'
         ? record.id === actor.schoolId
         : record.school_id === actor.schoolId);
+  if (entity === 'TimetableEntry' && actor.member?.role === 'teacher') {
+    return visible.filter((entry) => entry.member_id === actor.member.id
+      && !entry.archived && entry.published !== false);
+  }
   if (['AttendanceRecord', 'AttendanceSession'].includes(entity) && actor.member?.role === 'teacher') {
     const assignedClasses = new Set(getRecords('ClassTeacher')
       .filter((link) => link.school_id === actor.schoolId && link.member_id === actor.member.id)

@@ -511,6 +511,9 @@ function switchSchool(actor, body) {
 
 function saveTimetableEntries(actor, body) {
   const member = requireMembership(actor);
+  if (!isStaff(member)) {
+    throw Object.assign(new Error('Only school administrators and IT administrators can import timetable entries.'), { status: 403 });
+  }
   const schoolId = member.school_id;
   const entries = Array.isArray(body.entries) ? body.entries.slice(0, 300) : [];
   if (!entries.length) throw Object.assign(new Error('No timetable entries supplied'), { status: 400 });
@@ -589,6 +592,70 @@ function saveTimetableEntries(actor, body) {
       summary: `Saved ${created.length} timetable entries for ${target.full_name}${academicYear ? ` · ${academicYear.name}` : ''}${archived ? ` (${archived} previous archived)` : ''}${problems.length ? ` · ${problems.length} row problem(s)` : ''}`,
     });
     return { saved: created.length, archived, problems };
+  });
+}
+
+function approveGeneratedTimetable(actor, body) {
+  const member = requireMembership(actor);
+  requireStaff(member);
+  const schoolId = member.school_id;
+  const academicYear = getRecord('AcademicYear', body.academic_year_id);
+  if (!academicYear || academicYear.school_id !== schoolId) {
+    throw Object.assign(new Error('Choose an academic year belonging to this school.'), { status: 400 });
+  }
+  if (!Array.isArray(body.entries) || body.entries.length === 0 || body.entries.length > 2000) {
+    throw Object.assign(new Error('A proposed timetable must contain between 1 and 2,000 scheduled lessons.'), { status: 400 });
+  }
+  if (body.entries.some((entry) => !entry || typeof entry !== 'object' || Array.isArray(entry))) {
+    throw Object.assign(new Error('Every proposed timetable lesson must be an object.'), { status: 400 });
+  }
+  if (body.mode !== 'replace' && body.mode !== 'merge') {
+    throw Object.assign(new Error('Choose whether to replace or merge the existing timetable.'), { status: 400 });
+  }
+  const entries = body.entries.map((entry) => {
+    const teacher = getRecord('SchoolMember', entry.member_id);
+    if (!teacher || teacher.school_id !== schoolId || teacher.role !== 'teacher' || teacher.status === 'inactive') {
+      throw Object.assign(new Error('Every proposed lesson must have an active teacher from this school.'), { status: 400 });
+    }
+    const subjectClass = getRecord('SubjectClass', entry.subject_class_id);
+    if (!subjectClass || subjectClass.school_id !== schoolId || subjectClass.archived) {
+      throw Object.assign(new Error('Every proposed lesson must use an active subject class from this school.'), { status: 400 });
+    }
+    return {
+      school_id: schoolId,
+      member_id: teacher.id,
+      user_id: teacher.user_id || '',
+      academic_year_id: academicYear.id,
+      day_name: entry.day_name,
+      period_number: Number(entry.period_number),
+      start_time: entry.start_time || '',
+      end_time: entry.end_time || '',
+      subject: String(entry.subject || subjectClass.subject || '').trim(),
+      class_name: String(entry.class_name || subjectClass.name || '').trim(),
+      subject_class_id: subjectClass.id,
+      room: String(entry.room || subjectClass.room || '').trim(),
+      notes: String(entry.notes || ''),
+      archived: false,
+      published: true,
+    };
+  });
+
+  return withTransaction(() => {
+    const existing = records('TimetableEntry', (item) => item.school_id === schoolId && !item.archived);
+    const replaceIds = body.mode === 'replace'
+      ? existing.filter((item) => item.academic_year_id === academicYear.id
+        || (!item.academic_year_id && find('AcademicYear', (year) => year.school_id === schoolId && year.is_current)?.id === academicYear.id))
+        .map((item) => item.id)
+      : [];
+    assertNoTimetableConflicts(entries, existing, { ignoreIds: replaceIds });
+    for (const id of replaceIds) updateRecord('TimetableEntry', id, { archived: true });
+    const created = entries.map((entry) => createRecord('TimetableEntry', entry));
+    audit({ ...actor, member }, {
+      action: 'timetable.generated.approved',
+      entityType: 'TimetableEntry',
+      summary: `Approved generated timetable for ${academicYear.name}: ${created.length} lesson(s)${replaceIds.length ? `, replacing ${replaceIds.length}` : ''}`,
+    });
+    return { approved: created.length, archived: replaceIds.length, academic_year_id: academicYear.id };
   });
 }
 
@@ -1774,6 +1841,7 @@ export function invokeFunction(name, actor, body = {}) {
     updateMyProfile,
     switchSchool,
     saveTimetableEntries,
+    approveGeneratedTimetable,
     submitAttendance,
     bulkStudentAction,
     importStudents, // Ensure this key is present and points to function importStudents

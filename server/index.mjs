@@ -119,6 +119,10 @@ function ensureRecordAccess(entity, record, actor) {
     return;
   }
   if (actor.user.role === 'admin') return;
+  if (entity === 'TimetableEntry' && actor.member?.role === 'teacher'
+    && (record.member_id !== actor.member.id || record.archived || record.published === false)) {
+    throw Object.assign(new Error('Record not found'), { status: 404 });
+  }
   const allowed = entity === 'School'
     ? record.id === actor.schoolId
     : !!actor.schoolId && record.school_id === actor.schoolId;
@@ -149,6 +153,10 @@ function ensureWritePermission(entity, record, actor, operation) {
       }
     }
     return;
+  }
+  if (entity === 'TimetableEntry' && actor.user.role !== 'admin'
+    && !['school_admin', 'it_admin'].includes(actor.member?.role)) {
+    throw Object.assign(new Error('Only school administrators and IT administrators can manage timetable entries.'), { status: 403 });
   }
   if (entity === 'AcademicYear' && operation === 'delete') {
     const isCurrentYear = getCurrentAcademicYearId(record.school_id) === record.id;

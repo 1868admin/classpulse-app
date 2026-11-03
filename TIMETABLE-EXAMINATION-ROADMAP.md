@@ -37,15 +37,18 @@
   target an academic year, and replacing one year's schedule preserves other
   years. Timetable and availability writes validate teacher/year school
   relationships, and referenced years cannot be deleted.
+- Added role-gated Timetable Management views for master, teacher, class, room,
+  import, and generation workflows. The generator builds an editable proposal,
+  reports conflicts and unscheduled lessons, and publishes approved entries;
+  teachers can only view their own published timetable.
 
 ## Remaining implementation plan
 
-1. **Versioned timetable model:** introduce draft/review/approved/published/
+1. **Versioned timetable model:** persist draft/review/approved/published/
    archived versions and canonical lesson assignments; keep existing timetable
    records readable and provide a safe backfill/compatibility path.
-2. **Timetable editor and generator:** add class/room/teacher views, editable
-   assignments, locks and regeneration; implement hard-constraint validation
-   before adding preference optimization or publication.
+2. **Timetable editor and generator:** add assignment locks and advanced
+   regeneration, then preference optimization after hard-constraint validation.
 3. **Import workflow:** extend CSV import to explicit teacher/class/subject/room
    matching, duplicate detection, preview, and transactional confirmation. Add
    Excel parsing only where the current workbook dependency supports the required
