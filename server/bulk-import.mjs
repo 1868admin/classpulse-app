@@ -133,6 +133,7 @@ function attendanceTemplateData(member, body) {
     }))
     .sort((a, b) => `${a.surname} ${a.first_name}`.localeCompare(`${b.surname} ${b.first_name}`, undefined, { sensitivity: 'base' }));
   const dates = [];
+  const noSchoolDates = records('CalendarDate', (row) => row.school_id === schoolId && row.day_type === 'no_school').map((row) => row.date);
   if (body.start_date || body.end_date) {
     if (!isIsoDate(body.start_date) || !isIsoDate(body.end_date)) fail('Choose a valid start and end date');
     if (body.end_date < body.start_date) fail('The end date must not be before the start date');
@@ -153,6 +154,7 @@ function attendanceTemplateData(member, body) {
     academic_year: { id: year.id, name: year.name, start_date: year.start_date || '', end_date: year.end_date || '' },
     students,
     dates,
+    no_school_dates: noSchoolDates,
   };
 }
 

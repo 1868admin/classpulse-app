@@ -1,12 +1,14 @@
 import { useMemo, useState } from 'react';
 import moment from 'moment';
-import { CheckCheck, Loader2 } from 'lucide-react';
+import { CheckCheck, Loader2, X } from 'lucide-react';
 import { base44 } from '@/api/base44Client';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Calendar } from '@/components/ui/calendar';
+import { buildBulkCells, fromIso, isSelectableDate, normalizeDates, toIso } from '@/lib/bulkDates';
 import { notifyError, notifySuccess } from '@/lib/notify';
 import { ATTENDANCE_STATUSES } from '@/lib/dates';
 import { ClassSelect, SESSION_CHOICES, selectClass, useAttendanceClasses } from './AttendanceImportDialog';
@@ -21,8 +23,7 @@ export default function BulkMarkDialog({ open, onOpenChange, onSaved }) {
   const { classes, loading, error: loadError } = useAttendanceClasses(open);
   const today = moment().format('YYYY-MM-DD');
   const [classKey, setClassKey] = useState('');
-  const [start, setStart] = useState(today);
-  const [end, setEnd] = useState(today);
+  const [pickedDates, setPickedDates] = useState([]);
   const [sessionChoice, setSessionChoice] = useState('both');
   const [status, setStatus] = useState('present');
   const [overwrite, setOverwrite] = useState(false);
@@ -36,17 +37,19 @@ export default function BulkMarkDialog({ open, onOpenChange, onSaved }) {
 
   const [classType, classId] = classKey.split('|');
   const sessions = SESSION_CHOICES.find((item) => item.value === sessionChoice).sessions;
-  const dates = useMemo(() => (data?.dates || []).filter((item) => !item.skipped), [data]);
+  const dates = pickedDates;
+  const rules = useMemo(() => ({
+    start: data?.academic_year.start_date || '', end: data?.academic_year.end_date || '', noSchool: data?.no_school_dates || [],
+  }), [data]);
 
-  const reset = () => { setData(null); setSelected(new Set()); setStatuses({}); setSearch(''); setPreview(null); setError(''); setOverwrite(false); };
+  const reset = () => { setPickedDates([]); setData(null); setSelected(new Set()); setStatuses({}); setSearch(''); setPreview(null); setError(''); setOverwrite(false); };
   const close = (next) => { if (busy) return; if (!next) reset(); onOpenChange(next); };
 
   const loadStudents = async () => {
     setBusy('load'); setError('');
     try {
-      const result = await call({ action: 'template_data', class_type: classType, class_id: classId, start_date: start, end_date: end });
+      const result = await call({ action: 'template_data', class_type: classType, class_id: classId });
       if (!result.students.length) throw new Error('This class has no students.');
-      if (!result.dates.some((item) => !item.skipped)) throw new Error('No school days fall inside the selected dates.');
       setData(result);
       setSelected(new Set());
       setStatuses({});
@@ -77,19 +80,9 @@ export default function BulkMarkDialog({ open, onOpenChange, onSaved }) {
     return next;
   }));
 
-  const buildCells = () => {
-    const cells = [];
-    let row = 0;
-    for (const item of dates) {
-      for (const session of sessions) {
-        for (const student of selectedStudents) {
-          row += 1;
-          cells.push({ row, student_id_no: student.student_id_no, date: item.date, session, status: statusOf(student) });
-        }
-      }
-    }
-    return cells;
-  };
+  const buildCells = () => buildBulkCells({ dates, sessions, students: selectedStudents, statusOf });
+  const pickDates = (days) => change(() => setPickedDates(normalizeDates((days || []).map(toIso).filter((iso) => isSelectableDate(iso, rules)))));
+  const removeDate = (iso) => change(() => setPickedDates((current) => current.filter((item) => item !== iso)));
   const payload = (extra) => ({
     class_type: classType, class_id: classId, academic_year: data.academic_year.name, cells: buildCells(), overwrite, ...extra,
   });
@@ -138,8 +131,6 @@ export default function BulkMarkDialog({ open, onOpenChange, onSaved }) {
             <Label className="mb-1 block text-xs">Class</Label>
             <ClassSelect classes={classes} value={classKey} onChange={(value) => { setClassKey(value); reset(); }} loading={loading} />
           </div>
-          <div><Label className="mb-1 block text-xs">From</Label><Input type="date" value={start} onChange={(event) => { setStart(event.target.value); if (event.target.value > end) setEnd(event.target.value); reset(); }} /></div>
-          <div><Label className="mb-1 block text-xs">To</Label><Input type="date" value={end} min={start} onChange={(event) => { setEnd(event.target.value); reset(); }} /></div>
           <div>
             <Label className="mb-1 block text-xs">Sessions</Label>
             <select className={selectClass} value={sessionChoice} onChange={(event) => change(() => setSessionChoice(event.target.value))} aria-label="Sessions">
@@ -156,7 +147,7 @@ export default function BulkMarkDialog({ open, onOpenChange, onSaved }) {
 
         {!data ? (
           <div>
-            <Button type="button" onClick={loadStudents} disabled={!classId || !start || !end || !!busy}>
+            <Button type="button" onClick={loadStudents} disabled={!classId || !!busy}>
               {busy === 'load' ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <CheckCheck className="mr-1.5 h-3.5 w-3.5" />}
               Load students
             </Button>
@@ -164,9 +155,36 @@ export default function BulkMarkDialog({ open, onOpenChange, onSaved }) {
         ) : (
           <section className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              {data.class.name} · {data.academic_year.name} · {data.students.length} students · {dates.length} school day(s) × {sessions.join(' + ')}
-              {data.dates.some((item) => item.skipped) && ' · weekends and no-school days are skipped'}
+              {data.class.name} · {data.academic_year.name} · {data.students.length} students · {dates.length} date(s) × {sessions.join(' + ')}
             </p>
+            <div className="space-y-2 rounded-lg border border-border p-2 sm:p-3">
+              <Label className="block text-xs">Dates (tap days to add or remove; weekends, no-school days and days outside {data.academic_year.name} are unavailable)</Label>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                <Calendar
+                  mode="multiple"
+                  selected={dates.map(fromIso)}
+                  onSelect={pickDates}
+                  defaultMonth={dates.length ? fromIso(dates[0]) : (rules.start && today < rules.start ? fromIso(rules.start) : undefined)}
+                  disabled={(day) => !isSelectableDate(toIso(day), rules)}
+                  showOutsideDays={false}
+                  className="mx-auto rounded-md border border-border p-2 sm:mx-0"
+                />
+                <div className="min-w-0 flex-1" aria-live="polite">
+                  <p className="mb-1 text-xs font-medium">{dates.length} date(s) selected</p>
+                  {dates.length ? (
+                    <ul className="flex flex-wrap gap-1.5">
+                      {dates.map((iso) => (
+                        <li key={iso} className="flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-xs">
+                          {moment(iso).format('ddd D MMM YYYY')}
+                          <button type="button" onClick={() => removeDate(iso)} aria-label={`Remove ${iso}`} className="rounded-full p-0.5 hover:bg-background"><X className="h-3 w-3" /></button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : <p className="text-xs text-muted-foreground">No dates selected yet.</p>}
+                  {dates.length > 0 && <Button type="button" size="sm" variant="ghost" className="mt-1 h-7 px-2 text-xs" onClick={() => pickDates([])}>Clear dates</Button>}
+                </div>
+              </div>
+            </div>
             <div className="flex flex-wrap items-center gap-2">
               <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name or Student ID" aria-label="Search students" className="h-8 max-w-xs" />
               <Button type="button" size="sm" variant="outline" onClick={selectAll}>Select all</Button>
@@ -214,6 +232,8 @@ export default function BulkMarkDialog({ open, onOpenChange, onSaved }) {
               <div className="space-y-1 rounded-lg border border-border bg-muted/30 p-3 text-sm" role="status">
                 <p className="font-medium">Review before saving</p>
                 <p>Students selected: {selected.size}</p>
+                <p>Dates ({dates.length}): {dates.map((iso) => moment(iso).format('D MMM YYYY')).join(', ')}</p>
+                <p>Sessions: {sessions.join(' + ')}</p>
                 <p>Attendance records to create: {summary.created}</p>
                 <p>Existing records to update: {updating}</p>
                 <p>Students left unchanged: {unselectedCount}</p>
