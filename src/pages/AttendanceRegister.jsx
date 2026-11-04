@@ -8,7 +8,7 @@ import PageHeader from '@/components/ui-bits/PageHeader';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { notifyError } from '@/lib/notify';
+import { notifyError, notifySuccess } from '@/lib/notify';
 import { ATTENDANCE_STATUSES, fmtDate } from '@/lib/dates';
 import AttendanceSheetView from '@/components/attendance/AttendanceSheetView';
 import moment from 'moment';
@@ -53,6 +53,7 @@ export default function AttendanceRegister() {
   const [month, setMonth] = useState(moment(date).format('YYYY-MM'));
   const [saveStatus, setSaveStatus] = useState('saved');
   const [saveError, setSaveError] = useState('');
+  const [savingAttendancePeriod, setSavingAttendancePeriod] = useState(false);
   const [sortBy, setSortBy] = useState('name-asc');
   const [genderFilter, setGenderFilter] = useState('all');
   const [yearGroupFilter, setYearGroupFilter] = useState('all');
@@ -417,6 +418,54 @@ export default function AttendanceRegister() {
       return current;
     });
   };
+  const updateAttendancePeriod = async (attendancePeriod) => {
+    if (!klass || !isStaff || attendancePeriod === (klass.attendance_period || 'both')) return;
+    if (saveStatus !== 'saved' && !window.confirm('Attendance changes are still saving or need retrying. Change the class sessions?')) return;
+    if (saveStatus !== 'saved') {
+      failedWritesRef.current.clear();
+      setSaveStatus('saved');
+      setSaveError('');
+    }
+
+    setSavingAttendancePeriod(true);
+    try {
+      const activeTeachers = classLinks.filter((item) =>
+        item.class_id === classId && (item.class_type || 'homeroom') === 'homeroom' && item.is_active !== false);
+      const result = await base44.functions.invoke('saveClass', {
+        type: 'homeroom',
+        class_id: classId,
+        class: {
+          name: klass.name,
+          year_group_id: klass.year_group_id || '',
+          room: klass.room || '',
+          notes: klass.notes || '',
+          attendance_period: attendancePeriod,
+        },
+        teacher_ids: activeTeachers.map((item) => item.member_id),
+        primary_id: activeTeachers.find((item) => item.is_primary)?.member_id || activeTeachers[0]?.member_id || '',
+      });
+      if (result.data?.error) throw new Error(result.data.error);
+      const savedClass = result.data.class;
+      setKlass(savedClass);
+
+      const allowedLabels = attendancePeriod === 'morning'
+        ? ['Morning']
+        : attendancePeriod === 'afternoon'
+          ? ['Afternoon']
+          : ['Morning', 'Afternoon'];
+      if (!allowedLabels.includes(routeLabel)) {
+        setParams((current) => {
+          current.set('label', allowedLabels[0]);
+          return current;
+        }, { replace: true });
+      }
+      notifySuccess('Attendance sessions updated', savedClass.name);
+    } catch (error) {
+      notifyError('Could not update attendance sessions', error.response?.data?.error || error.message);
+    } finally {
+      setSavingAttendancePeriod(false);
+    }
+  };
   const updateDate = (nextDate) => {
     if (saveStatus !== 'saved' && !window.confirm('Attendance changes are still saving or need retrying. Change the date?')) return;
     if (saveStatus !== 'saved') {
@@ -508,6 +557,23 @@ export default function AttendanceRegister() {
             </Select>
           ) : null}
         </div>
+        {type === 'homeroom' && isStaff && (
+          <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+            Homeroom attendance sessions
+            <Select
+              value={klass?.attendance_period || 'both'}
+              disabled={savingAttendancePeriod || saveStatus === 'saving'}
+              onValueChange={updateAttendancePeriod}
+            >
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="morning">Morning</SelectItem>
+                <SelectItem value="afternoon">Afternoon</SelectItem>
+                <SelectItem value="both">Both morning and afternoon</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+        )}
         {type === 'subject' && (
           <label className="grid gap-1 text-xs font-medium text-muted-foreground">
             Linked timetable periods
