@@ -81,7 +81,10 @@ export default function Homerooms() {
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <Link to={`/homerooms/${c.id}`} className="text-base font-bold hover:text-primary">{c.name}</Link>
-                    <p className="text-xs text-muted-foreground">{c.year_group_name || 'No year group'}{c.room ? ` · ${c.room}` : ''}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {c.year_group_name || 'No year group'}{c.room ? ` · ${c.room}` : ''}
+                      {' · '}{c.attendance_period === 'morning' ? 'Morning' : c.attendance_period === 'afternoon' ? 'Afternoon' : 'Morning & afternoon'} attendance
+                    </p>
                   </div>
                   <div className="flex items-center gap-1">
                     <ClassOrderControls

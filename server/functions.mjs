@@ -1504,6 +1504,16 @@ function submitAttendance(actor, body) {
   if (!klass || klass.school_id !== schoolId || klass.archived) {
     throw Object.assign(new Error('Class not found'), { status: 404 });
   }
+  if (class_type === 'homeroom') {
+    const allowedLabels = klass.attendance_period === 'morning'
+      ? ['Morning']
+      : klass.attendance_period === 'afternoon'
+        ? ['Afternoon']
+        : ['Morning', 'Afternoon'];
+    if (!allowedLabels.includes(session_label)) {
+      throw Object.assign(new Error('This homeroom class is not scheduled for the selected attendance session'), { status: 400 });
+    }
+  }
   if (!isStaff(member) && !records('ClassTeacher', (link) =>
     link.school_id === schoolId && link.class_id === class_id && link.member_id === member.id
     && link.is_active !== false).length) {
@@ -2032,6 +2042,10 @@ function saveClass(actor, body) {
   if (yearGroupId && yearGroup?.school_id !== schoolId) {
     throw Object.assign(new Error('Year group does not belong to this school'), { status: 400 });
   }
+  const attendancePeriod = input.attendance_period ?? existing?.attendance_period ?? 'both';
+  if (type === 'homeroom' && !['morning', 'afternoon', 'both'].includes(attendancePeriod)) {
+    throw Object.assign(new Error('Choose morning, afternoon or both attendance sessions'), { status: 400 });
+  }
   const homeroomIds = type === 'subject' && Array.isArray(input.homeroom_ids) ? [...new Set(input.homeroom_ids)] : [];
   const homerooms = homeroomIds.map((id) => getRecord('HomeroomClass', id));
   if (homerooms.some((homeroom) => !homeroom || homeroom.school_id !== schoolId)) {
@@ -2054,6 +2068,7 @@ function saveClass(actor, body) {
       year_group_name: yearGroup?.name || '',
       room: String(input.room || ''),
       notes: String(input.notes || ''),
+      ...(type === 'homeroom' ? { attendance_period: attendancePeriod } : {}),
       ...(type === 'subject' ? {
         subject,
         homeroom_ids: homeroomIds,

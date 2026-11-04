@@ -64,7 +64,11 @@ test('class, teacher, student and batch-query workflows', async () => {
     });
     assert.equal(homeroom.status, 200);
     assert.equal(homeroom.data.class.year_group_name, 'Form 1');
+    assert.equal(homeroom.data.class.attendance_period, 'both');
     assert.equal((await fn('saveClass', { type: 'homeroom', class: { name: 'form 1a' } })).status, 409);
+    assert.equal((await fn('saveClass', {
+      type: 'homeroom', class: { name: 'Invalid Period', attendance_period: 'evening' },
+    })).status, 400);
     assert.equal((await fn('saveClass', { type: 'subject', class: { name: 'X', subject: 'Y' }, teacher_ids: ['missing'] })).status, 400);
 
     const subject = await fn('saveClass', {
@@ -73,9 +77,11 @@ test('class, teacher, student and batch-query workflows', async () => {
     assert.deepEqual(subject.data.class.homeroom_names, ['Form 1A']);
 
     const edited = await fn('saveClass', {
-      type: 'homeroom', class_id: homeroom.data.class.id, class: { name: 'Form 1B', year_group_id: form2.id }, teacher_ids: [tina.id],
+      type: 'homeroom', class_id: homeroom.data.class.id,
+      class: { name: 'Form 1B', year_group_id: form2.id, attendance_period: 'afternoon' }, teacher_ids: [tina.id],
     });
     assert.equal(edited.data.class.year_group_name, 'Form 2');
+    assert.equal(edited.data.class.attendance_period, 'afternoon');
 
     const [classes, links] = (await batch([
       { entity: 'HomeroomClass', query: { school_id: school.id, archived: false } },

@@ -70,7 +70,12 @@ export default function Attendance() {
       .filter((h) => !myHomeroomIds || myHomeroomIds.has(h.id))
       .filter((h) => !selectedClass || selectedClass === h.id)
       .forEach((h) => {
-        ['Morning', 'Afternoon'].forEach((label) => {
+        const labels = h.attendance_period === 'morning'
+          ? ['Morning']
+          : h.attendance_period === 'afternoon'
+            ? ['Afternoon']
+            : ['Morning', 'Afternoon'];
+        labels.forEach((label) => {
           const session = sessions.find((s) => s.class_id === h.id && s.session_label === label);
           const teachers = links.filter((l) => l.class_id === h.id).map((l) => l.member_name);
           out.push({

@@ -23,6 +23,15 @@
     "notes": {
       "type": "string"
     },
+    "attendance_period": {
+      "type": "string",
+      "enum": [
+        "morning",
+        "afternoon",
+        "both"
+      ],
+      "default": "both"
+    },
     "student_count": {
       "type": "number",
       "default": 0

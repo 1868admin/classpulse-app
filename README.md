@@ -187,7 +187,8 @@ Then open `http://127.0.0.1:4400`.
   administrators can set the monthly student attendance alert threshold in
   **Settings → School details**. Homeroom dashboards also show the number of
   boys and girls marked present for each class. Teachers' attendance analytics
-  and register actions are restricted to classes assigned to them.
+  and register actions are restricted to classes assigned to them. Homeroom
+  classes can be configured for morning, afternoon, or both attendance sessions.
 
 ## Staff lifecycle and assignments
 

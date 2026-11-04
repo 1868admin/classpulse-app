@@ -90,6 +90,11 @@ test('attendance updates are additive, correctable, clearable and session-specif
       class: { name: 'Form 1A' },
       teacher_ids: [teacher.id],
     })).data.class;
+    const morningClass = (await admin('saveClass', {
+      type: 'homeroom',
+      class: { name: 'Form 1B', attendance_period: 'morning' },
+      teacher_ids: [teacher.id],
+    })).data.class;
     const yearGroup = (await admin('queryBatch', {
       queries: [{ entity: 'YearGroup', query: { school_id: school.id }, options: { limit: 10 } }],
     })).data.results[0].items[0];
@@ -165,6 +170,12 @@ test('attendance updates are additive, correctable, clearable and session-specif
 
     const afternoon = await teacherCall('submitAttendance', attendance('2026-09-08', 'Afternoon', [record(first, 'present')]));
     assert.equal(afternoon.data.session.session_label, 'Afternoon');
+    const rejectedAfternoon = await teacherCall('submitAttendance', {
+      ...attendance('2026-09-08', 'Afternoon', []),
+      class_id: morningClass.id,
+      class_name: morningClass.name,
+    });
+    assert.equal(rejectedAfternoon.status, 400, 'a morning-only homeroom rejects afternoon attendance');
     const sessions = (await call('/api/entities/AttendanceSession/filter', 'POST', {
       query: { school_id: school.id, class_id: klass.id, date: '2026-09-08' },
     }, teacherCookie)).data.items;

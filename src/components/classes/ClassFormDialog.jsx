@@ -13,7 +13,7 @@ const SUBJECTS = ['Mathematics', 'English', 'Physics', 'Chemistry', 'Biology', '
 
 export default function ClassFormDialog({ open, onOpenChange, type = 'subject', klass, yearGroups, homerooms, teachers, onSaved }) {
   const { schoolId, member, isStaff } = useSchool();
-  const [form, setForm] = useState({ name: '', subject: '', year_group_id: '', room: '', notes: '', homeroom_ids: [] });
+  const [form, setForm] = useState({ name: '', subject: '', year_group_id: '', room: '', notes: '', homeroom_ids: [], attendance_period: 'both' });
   const [teacherIds, setTeacherIds] = useState([]);
   const [primaryId, setPrimaryId] = useState('');
   const [busy, setBusy] = useState(false);
@@ -31,6 +31,7 @@ export default function ClassFormDialog({ open, onOpenChange, type = 'subject', 
       room: klass?.room || '',
       notes: klass?.notes || '',
       homeroom_ids: klass?.homeroom_ids || [],
+      attendance_period: klass?.attendance_period || 'both',
     });
     let cancelled = false;
     const loadTeachers = async () => {
@@ -78,6 +79,7 @@ export default function ClassFormDialog({ open, onOpenChange, type = 'subject', 
           room: form.room,
           notes: form.notes,
           homeroom_ids: form.homeroom_ids,
+          attendance_period: form.attendance_period,
         },
         teacher_ids: teacherIds,
         primary_id: primaryId,
@@ -126,6 +128,19 @@ export default function ClassFormDialog({ open, onOpenChange, type = 'subject', 
             <Label className="mb-1.5 block text-[13px]">Room</Label>
             <Input value={form.room} onChange={(e) => setForm((f) => ({ ...f, room: e.target.value }))} placeholder="Lab 2" />
           </div>
+          {type === 'homeroom' && (
+            <div className="sm:col-span-2">
+              <Label className="mb-1.5 block text-[13px]">Attendance sessions</Label>
+              <Select value={form.attendance_period} onValueChange={(value) => setForm((f) => ({ ...f, attendance_period: value }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="morning">Morning</SelectItem>
+                  <SelectItem value="afternoon">Afternoon</SelectItem>
+                  <SelectItem value="both">Both morning and afternoon</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {type === 'subject' && (
             <div className="sm:col-span-2">

@@ -162,6 +162,20 @@ export default function AttendanceRegister() {
     load();
     return () => { loadRequestRef.current += 1; };
   }, [load]);
+  useEffect(() => {
+    if (type !== 'homeroom' || klass?.id !== classId) return;
+    const allowedLabels = klass.attendance_period === 'morning'
+      ? ['Morning']
+      : klass.attendance_period === 'afternoon'
+        ? ['Afternoon']
+        : ['Morning', 'Afternoon'];
+    if (!allowedLabels.includes(routeLabel)) {
+      setParams((current) => {
+        current.set('label', allowedLabels[0]);
+        return current;
+      }, { replace: true });
+    }
+  }, [type, klass, classId, routeLabel, setParams]);
   useEffect(() => { setMonth(moment(date).format('YYYY-MM')); }, [date]);
 
   useEffect(() => {
@@ -487,8 +501,9 @@ export default function AttendanceRegister() {
               }}>
               <SelectTrigger aria-label="Form session"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="Morning">Morning</SelectItem>
-                <SelectItem value="Afternoon">Afternoon</SelectItem>
+                {(klass?.attendance_period === 'morning' ? ['Morning'] : klass?.attendance_period === 'afternoon' ? ['Afternoon'] : ['Morning', 'Afternoon']).map((sessionLabel) => (
+                  <SelectItem key={sessionLabel} value={sessionLabel}>{sessionLabel}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           ) : null}
