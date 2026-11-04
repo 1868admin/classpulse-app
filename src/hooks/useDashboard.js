@@ -267,9 +267,10 @@ export function useAdminDashboard(schoolId, alertThreshold) {
     const classRows = classes.map((klass) => {
       const enrolled = classCounts.get(klass.id) || 0;
       const submittedSessions = todaySessionsByClass.get(klass.id) || [];
-      const completedSession = enrolled > 0 && submittedSessions.some((session) => (session.student_count || 0) >= enrolled);
-      const partialSession = submittedSessions.some((session) => (session.student_count || 0) < enrolled);
-      const todayStatus = submittedSessions.length === 0
+      const markedSessions = submittedSessions.filter((session) => Number(session.student_count || 0) > 0);
+      const completedSession = enrolled > 0 && markedSessions.some((session) => (session.student_count || 0) >= enrolled);
+      const partialSession = markedSessions.some((session) => (session.student_count || 0) < enrolled);
+      const todayStatus = markedSessions.length === 0
         ? 'not_taken'
         : completedSession ? 'complete' : partialSession ? 'partial' : 'complete';
       const monthStats = monthByClass.get(klass.id) || { total: 0, present: 0, late: 0 };

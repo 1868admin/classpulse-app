@@ -1523,12 +1523,16 @@ function submitAttendance(actor, body) {
   }
   const sessionKey = [schoolId, class_type, class_id, date, session_label].join('|');
   const academicYear = find('AcademicYear', (item) => item.school_id === schoolId && item.is_current);
-  const counts = { total: incoming.length, present: 0, absent: 0, late: 0, excused: 0 };
+  const incomingStudentIds = new Set();
   for (const record of incoming) {
-    if (!['present', 'absent', 'late', 'excused'].includes(record.status || 'present')) {
+    if (!record.student_id) continue;
+    if (incomingStudentIds.has(record.student_id)) {
+      throw Object.assign(new Error('A student can only be included once per attendance update'), { status: 400 });
+    }
+    incomingStudentIds.add(record.student_id);
+    if (record.clear !== true && !['present', 'absent', 'late', 'excused'].includes(record.status || 'present')) {
       throw Object.assign(new Error('Attendance status must be present, absent, late or excused'), { status: 400 });
     }
-    counts[record.status || 'present'] += 1;
   }
   const sameDateClassSessions = records('AttendanceSession', (item) =>
     item.school_id === schoolId && item.class_id === class_id && (item.class_type || 'homeroom') === class_type && item.date === date);
@@ -1567,11 +1571,12 @@ function submitAttendance(actor, body) {
     ? `Periods ${linkedPeriods.join(' + ')}`
     : session_label;
   const linkedSessionKey = [schoolId, class_type, class_id, date, linkedLabel].join('|');
-  if (existing && !isStaff(member) && existing.user_id !== actor.user.id) {
-    throw Object.assign(new Error('This register was submitted by another teacher'), { status: 403 });
-  }
-
   return withTransaction(() => {
+    const currentExisting = find('AttendanceSession', (item) =>
+      item.school_id === schoolId && item.session_key === linkedSessionKey) || existing;
+    if (currentExisting && !isStaff(member) && currentExisting.user_id !== actor.user.id) {
+      throw Object.assign(new Error('This register was submitted by another teacher'), { status: 403 });
+    }
     const sessionData = {
       school_id: schoolId,
       session_key: linkedSessionKey,
@@ -1588,17 +1593,17 @@ function submitAttendance(actor, body) {
       member_name: body.member_name && isStaff(member) ? body.member_name : member.full_name,
       user_id: actor.user.id,
       academic_year_id: academicYear?.id || '',
-      student_count: counts.total,
-      present_count: counts.present,
-      absent_count: counts.absent,
-      late_count: counts.late,
-      excused_count: counts.excused,
-      status: 'submitted',
+      student_count: 0,
+      present_count: 0,
+      absent_count: 0,
+      late_count: 0,
+      excused_count: 0,
+      status: 'in_progress',
       submitted_at: new Date().toISOString(),
       last_edited_by: actor.user.full_name || actor.user.email || actor.user.username,
     };
-    const session = existing
-      ? updateRecord('AttendanceSession', existing.id, sessionData)
+    const session = currentExisting
+      ? updateRecord('AttendanceSession', currentExisting.id, sessionData)
       : createRecord('AttendanceSession', sessionData);
     const previous = records('AttendanceRecord', (record) =>
       record.school_id === schoolId && record.session_id === session.id);
@@ -1608,6 +1613,13 @@ function submitAttendance(actor, body) {
     for (const record of incoming) {
       if (!record.student_id) continue;
       const old = previousByStudent.get(record.student_id);
+      if (record.clear === true) {
+        if (old) {
+          deleteRecord('AttendanceRecord', old.id);
+          changed += 1;
+        }
+        continue;
+      }
       const status = record.status || 'present';
       if (!old) {
         creates.push({
@@ -1630,17 +1642,30 @@ function submitAttendance(actor, body) {
       }
     }
     for (const row of creates) createRecord('AttendanceRecord', row);
-    const incomingIds = new Set(incoming.map((record) => record.student_id).filter(Boolean));
-    for (const old of previous) {
-      if (!incomingIds.has(old.student_id)) deleteRecord('AttendanceRecord', old.id);
-    }
+    const finalByStudent = new Map();
+    records('AttendanceRecord', (record) =>
+      record.school_id === schoolId && record.session_id === session.id)
+      .forEach((record) => finalByStudent.set(record.student_id, record));
+    const counts = { present: 0, absent: 0, late: 0, excused: 0 };
+    finalByStudent.forEach((record) => {
+      if (Object.hasOwn(counts, record.status)) counts[record.status] += 1;
+    });
+    const markedCount = finalByStudent.size;
+    const updatedSession = updateRecord('AttendanceSession', session.id, {
+      student_count: markedCount,
+      present_count: counts.present,
+      absent_count: counts.absent,
+      late_count: counts.late,
+      excused_count: counts.excused,
+      status: classMemberships.length > 0 && markedCount >= classMemberships.length ? 'submitted' : 'in_progress',
+    });
     audit({ ...actor, member }, {
-      action: existing ? 'attendance.corrected' : 'attendance.submitted',
+      action: currentExisting ? 'attendance.corrected' : 'attendance.submitted',
       entityType: 'AttendanceSession',
       entityId: session.id,
-      summary: `${class_name || class_type} · ${date} · ${session_label}: ${counts.present} present, ${counts.absent} absent, ${counts.late} late`,
+      summary: `${class_name || class_type} · ${date} · ${linkedLabel}: ${counts.present} present, ${counts.absent} absent, ${counts.late} late`,
     });
-    return { session, changed, created: creates.length };
+    return { session: updatedSession, changed, created: creates.length, marked_count: markedCount };
   });
 }
 

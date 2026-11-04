@@ -75,7 +75,7 @@ export default function Attendance() {
           const teachers = links.filter((l) => l.class_id === h.id).map((l) => l.member_name);
           out.push({
             key: `${h.id}-${label}`, classId: h.id, className: h.name, type: 'homeroom',
-            label, period: '', subject: '', teachers, session,
+            label, period: '', subject: '', teachers, session, enrolled: Number(h.student_count || 0),
           });
         });
       });
@@ -125,6 +125,7 @@ export default function Attendance() {
           subject: cls.subject,
           teachers,
           session,
+          enrolled: Number(cls.student_count || 0),
           time: current.start_time,
         });
       }
@@ -150,6 +151,7 @@ export default function Attendance() {
         subject: cls.subject,
         teachers: links.filter((link) => link.class_id === cls.id).map((link) => link.member_name),
         session: sessions.find((item) => item.class_id === cls.id && item.session_label === label),
+        enrolled: Number(cls.student_count || 0),
       });
     }
 
@@ -197,8 +199,14 @@ export default function Attendance() {
     );
   };
 
-  const submitted = rows.filter((r) => r.session).length;
-  const pending = rows.length - submitted;
+  const progressFor = (row) => {
+    const marked = Number(row.session?.student_count || 0);
+    if (!marked) return 'Not Started';
+    return row.enrolled > 0 && marked >= row.enrolled ? 'Completed' : 'In Progress';
+  };
+  const submitted = rows.filter((row) => progressFor(row) === 'Completed').length;
+  const inProgress = rows.filter((row) => progressFor(row) === 'In Progress').length;
+  const pending = rows.filter((row) => progressFor(row) === 'Not Started').length;
   const totals = sessions.reduce((acc, s) => {
     acc.students += s.student_count || 0;
     acc.present += s.present_count || 0;
@@ -249,11 +257,12 @@ export default function Attendance() {
           This date is marked <strong>No school</strong>{calendar?.reason ? ` (${calendar.reason})` : ''}. Authorised teachers may still record attendance for the selected date.
         </div>
       )}
-      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
         {[
           { label: 'Attendance', value: `${rate}%`, icon: ClipboardCheck },
-          { label: 'Registers submitted', value: `${submitted}/${rows.length}`, icon: CheckCircle2 },
-          { label: 'Outstanding', value: pending, icon: AlertCircle },
+          { label: 'Registers completed', value: `${submitted}/${rows.length}`, icon: CheckCircle2 },
+          { label: 'In progress', value: inProgress, icon: AlertCircle },
+          { label: 'Not started', value: pending, icon: AlertCircle },
           { label: 'Present today', value: totals.present, icon: Users },
         ].map((s) => (
           <div key={s.label} className="cp-card flex items-center gap-3 p-3.5">
@@ -307,11 +316,11 @@ export default function Attendance() {
                     <td className="px-4 py-2.5">
                       {r.session ? (
                         <div>
-                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                            <CheckCircle2 className="h-3 w-3" />Submitted
+                          <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${progressFor(r) === 'Completed' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'}`}>
+                            <CheckCircle2 className="h-3 w-3" />{progressFor(r)}
                           </span>
                           <p className="mt-0.5 text-[10px] text-muted-foreground">
-                            {r.session.present_count} present · {r.session.absent_count} absent · {moment(r.session.submitted_at).format('h:mm a')}
+                            {r.session.student_count || 0}/{r.enrolled} marked · {r.session.present_count} present · {r.session.absent_count} absent · {moment(r.session.submitted_at).format('h:mm a')}
                           </p>
                         </div>
                       ) : (
@@ -349,8 +358,8 @@ export default function Attendance() {
                 <p className="text-xs text-muted-foreground">Teacher: {row.session ? memberName(row.session.member_id) : row.teachers.join(', ') || '—'}</p>
                 <div className="flex items-center justify-between gap-2">
                   {row.session ? (
-                    <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
-                      Submitted · {row.session.present_count} present · {row.session.absent_count} absent
+                    <span className={`text-xs font-medium ${progressFor(row) === 'Completed' ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>
+                      {progressFor(row)} · {row.session.student_count || 0}/{row.enrolled} marked · {row.session.present_count} present · {row.session.absent_count} absent
                     </span>
                   ) : <span className="text-xs font-medium text-amber-700 dark:text-amber-300">Not recorded</span>}
                   <Link
@@ -369,7 +378,7 @@ export default function Attendance() {
       {sessions.length > 0 && (
         <div className="cp-card mt-4 overflow-hidden">
           <div className="border-b border-border px-4 py-2.5">
-            <h2 className="text-sm font-bold">Registers submitted on this date</h2>
+            <h2 className="text-sm font-bold">Registers recorded on this date</h2>
           </div>
           <div className="cp-scroll-x">
             <table className="w-full min-w-[600px] text-sm">
